@@ -53,7 +53,7 @@ export default async (req: Request) => {
           model,
           messages: [{ role: 'user', content: prompt }],
           max_tokens: 600,
-          temperature: 0.7,
+          temperature: 1,
         }
       );
 
