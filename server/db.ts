@@ -1,8 +1,17 @@
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import path from 'path';
+import fs from 'fs'; // 🌟 新增：引入文件系统模块
 
-const dbPath = process.env.DB_PATH || path.resolve(process.cwd(), 'database.sqlite');
+// 🌟 修改：优先读取 DATABASE_PATH，兼容 DB_PATH，最后才回退到本地目录
+const dbPath = process.env.DATABASE_PATH || process.env.DB_PATH || path.resolve(process.cwd(), 'database.sqlite');
+
+// 🌟 新增：确保 /data 这样的持久化目录已经被创建，防止 SQLite 找不到文件夹而报错
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const db = new Database(dbPath);
 
 // Initialize tables
