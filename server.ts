@@ -64,15 +64,8 @@ async function startServer() {
     return { client, model };
   };
 
-  const savePlanFile = (studentId: number, unitId: number, content: string) => {
-    if (!fs.existsSync(PLAN_DIR)) fs.mkdirSync(PLAN_DIR, { recursive: true });
-    const files = fs.readdirSync(PLAN_DIR).filter(f => f.startsWith(`${studentId}-${unitId}-plan-`) && f.endsWith('.md'));
-    const version = files.length + 1;
-    const filename = `${studentId}-${unitId}-plan-${version}.md`;
-    const filepath = path.join(PLAN_DIR, filename);
-    fs.writeFileSync(filepath, content, 'utf-8');
-    return { filepath, version };
-  };
+  // Disabled plan file persistence per user request (was saving markdown to /data/plan)
+  const savePlanFile = (_studentId: number, _unitId: number, _content: string) => null;
 
   const buildPromptWithFiles = (basePrompt: string) => {
     const match = basePrompt.match(/FILES:\s*([^\n]+)/i);

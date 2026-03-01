@@ -7,7 +7,7 @@ export const prompts = {
 学习目标：${unit.objectives}
 相关学习资源：
 ${resourcesText}
-总资源：FILES: /data/admin/计算机视觉基础大纲.md, /data/admin/计算机视觉基础辅修说明.pdf
+FILES: /data/admin/计算机视觉基础大纲.md, /data/admin/计算机视觉基础辅修说明.pdf
 
 请根据上述内容，为学生制定一份详细的每周学习计划，帮助他们完成学习目标，并合理安排学习资源的使用。请直接返回计划内容，不要包含多余的废话。`,
 
@@ -43,7 +43,8 @@ ${content || '无'}
 请根据当前网页的内容（上下文）以及学生提出的问题，为学生进行解惑。
 【上下文内容】：
 ${context}
-FILES: /data/admin/计算机视觉基础大纲.md, /data/admin/计算机视觉基础辅修说明.pdf
+FILES: /data/admin/计算机视觉基础大纲.md
+FILES: /data/admin/计算机视觉基础辅修说明.pdf
 【学生的问题】：
 ${question}
 

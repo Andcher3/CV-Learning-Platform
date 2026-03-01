@@ -5,19 +5,8 @@ import { prompts } from '../../server/prompts';
 import fs from 'fs';
 import path from 'path';
 
-const PLAN_DIR = path.join(process.env.DATA_DIR || '/data', 'plan');
-if (!fs.existsSync(PLAN_DIR)) {
-  fs.mkdirSync(PLAN_DIR, { recursive: true });
-}
-
-const savePlanFile = (studentId: number, unitId: number, content: string) => {
-  const files = fs.readdirSync(PLAN_DIR).filter(f => f.startsWith(`${studentId}-${unitId}-plan-`) && f.endsWith('.md'));
-  const version = files.length + 1;
-  const filename = `${studentId}-${unitId}-plan-${version}.md`;
-  const filepath = path.join(PLAN_DIR, filename);
-  fs.writeFileSync(filepath, content, 'utf-8');
-  return { filepath, version };
-};
+// Plan file persistence disabled for troubleshooting
+const savePlanFile = (_studentId: number, _unitId: number, _content: string) => null;
 
 export default async (req: Request) => {
   const url = new URL(req.url);
@@ -70,7 +59,7 @@ export default async (req: Request) => {
 
       const ai_raw = response.choices?.[0]?.message?.content || '';
       const saved = savePlanFile(user.id, Number(unitId), planContent);
-      return new Response(JSON.stringify({ plan_content: planContent, prompt_preview: prompt, files_used: files, ai_raw, plan_file: saved.filepath, plan_version: saved.version }));
+      return new Response(JSON.stringify({ plan_content: planContent, prompt_preview: prompt, files_used: files, ai_raw, plan_file: saved, plan_version: null }));
     } catch (err: any) {
       return new Response(JSON.stringify({ error: err.message }), { status: 500 });
     }
