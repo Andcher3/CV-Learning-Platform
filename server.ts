@@ -11,7 +11,6 @@ import fs from 'fs';
 import { prompts } from './server/prompts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
-const DATA_ROOT = process.env.DATA_ROOT || '/data';
 
 // Ensure uploads directory exists
 const uploadsDir = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
@@ -51,60 +50,11 @@ async function startServer() {
       throw new Error('API Key is missing. Please configure it in Admin Settings or environment variables.');
     }
 
-    const baseURL = config.ai_base_url || process.env.AI_BASE_URL;
-    const client = new OpenAI({ apiKey, baseURL });
+    const baseURL = config.ai_base_url || process.env.AI_BASE_URL || 'https://api.gptsapi.net/v1';
+    const client = new OpenAI({ apiKey, baseURL, timeout: 30000, maxRetries: 2 });
     const model = config.ai_model || process.env.AI_MODEL || 'gpt-4o-mini';
 
     return { client, model };
-  };
-
-  const enrichPromptWithFiles = (prompt: string) => {
-    // Extract files:["/data/a.txt"] array from prompt
-    const match = prompt.match(/files\s*:\s*(\[[^\]]+\])/i);
-    if (!match) return { prompt, files: [] as string[] };
-
-    let files: string[] = [];
-    try {
-      files = JSON.parse(match[1]);
-      if (!Array.isArray(files)) files = [];
-    } catch (e) {
-      files = [];
-    }
-
-    const readable: { path: string; content: string }[] = [];
-    for (const f of files) {
-      if (typeof f !== 'string') continue;
-      const absPath = path.resolve(f);
-      if (!absPath.startsWith(path.resolve(DATA_ROOT))) continue; // safety: only /data
-      if (!fs.existsSync(absPath)) continue;
-      try {
-        const content = fs.readFileSync(absPath, 'utf8');
-        // truncate to avoid overly long prompts
-        const truncated = content.length > 20000 ? content.slice(0, 20000) + '\n...[truncated]' : content;
-        readable.push({ path: absPath, content: truncated });
-      } catch (e) {
-        continue;
-      }
-    }
-
-    if (readable.length === 0) return { prompt, files };
-
-    const append = readable
-      .map(item => `---\n路径: ${item.path}\n内容:\n${item.content}`)
-      .join('\n\n');
-
-    const finalPrompt = `${prompt}\n\n[附加文件内容]\n${append}`;
-    return { prompt: finalPrompt, files };
-  };
-
-  const logAi = (params: { userId?: number; unitId?: number | string | null; action: string; prompt: string; response: string }) => {
-    const { userId = null, unitId = null, action, prompt, response } = params;
-    try {
-      db.prepare('INSERT INTO ai_logs (user_id, unit_id, action, prompt, response) VALUES (?, ?, ?, ?, ?)')
-        .run(userId, unitId, action, prompt, response);
-    } catch (err) {
-      console.error('Failed to log AI interaction', err);
-    }
   };
 
   // Auth Middleware
@@ -191,7 +141,6 @@ async function startServer() {
         messages: [{ role: 'user', content: message }],
       });
       const reply = response.choices?.[0]?.message?.content?.trim() || '';
-      logAi({ userId: req.user.id, action: 'admin_ai_test', prompt: message, response: JSON.stringify(response) });
       res.json({ ok: true, reply });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message || 'AI test failed' });
@@ -219,19 +168,6 @@ async function startServer() {
       ORDER BY p.updated_at DESC
     `).all();
     res.json(plans);
-  });
-
-  app.get('/api/admin/ai-logs', authenticate, requireAdmin, (req: any, res: any) => {
-    const limit = Number(req.query.limit || 200);
-    const rows = db.prepare(`
-      SELECT l.*, u.username AS user_username, un.title AS unit_title
-      FROM ai_logs l
-      LEFT JOIN users u ON l.user_id = u.id
-      LEFT JOIN units un ON l.unit_id = un.id
-      ORDER BY l.created_at DESC
-      LIMIT ?
-    `).all(limit);
-    res.json(rows);
   });
 
   // Auth Routes
@@ -292,14 +228,12 @@ async function startServer() {
 
       const prompt = prompts.generatePlan(unit, resourcesText);
 
-      const enriched = enrichPromptWithFiles(prompt);
       const response = await client.chat.completions.create({
         model,
-        messages: [{ role: 'user', content: enriched.prompt }],
+        messages: [{ role: 'user', content: prompt }],
       });
 
       const planContent = response.choices?.[0]?.message?.content?.trim() || '无法生成计划';
-      logAi({ userId: req.user.id, unitId: unitId, action: 'plan_generate', prompt: enriched.prompt, response: JSON.stringify(response) });
       
       const existing = db.prepare('SELECT id FROM study_plans WHERE student_id = ? AND unit_id = ?').get(req.user.id, unitId);
       if (existing) {
@@ -337,14 +271,12 @@ async function startServer() {
         const { client, model } = getAiClient();
         const prompt = prompts.adjustPlan(unit, plan, content, fileUrl);
 
-          const enriched = enrichPromptWithFiles(prompt);
-          const response = await client.chat.completions.create({
-            model,
-            messages: [{ role: 'user', content: enriched.prompt }],
-          });
+        const response = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+        });
 
-          const newPlanContent = response.choices?.[0]?.message?.content?.trim() || plan.plan_content;
-          logAi({ userId: req.user.id, unitId, action: 'plan_adjust', prompt: enriched.prompt, response: JSON.stringify(response) });
+        const newPlanContent = response.choices?.[0]?.message?.content?.trim() || plan.plan_content;
         db.prepare('UPDATE study_plans SET plan_content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newPlanContent, plan.id);
       }
     } catch (err) {
@@ -369,10 +301,9 @@ async function startServer() {
       const { client, model } = getAiClient();
       const prompt = prompts.gradeUnit(unit, plan, latestNote);
 
-      const enriched = enrichPromptWithFiles(prompt);
       const response = await client.chat.completions.create({
         model,
-        messages: [{ role: 'user', content: enriched.prompt }],
+        messages: [{ role: 'user', content: prompt }],
       });
 
       const raw = response.choices?.[0]?.message?.content || '';
@@ -382,7 +313,6 @@ async function startServer() {
       } catch (e) {
         throw new Error('AI 返回的内容不是有效的 JSON');
       }
-      logAi({ userId: req.user.id, unitId, action: 'grade_unit', prompt: enriched.prompt, response: JSON.stringify(response) });
       db.prepare('UPDATE notes SET grade = ?, feedback = ? WHERE id = ?').run(result.grade, result.feedback, latestNote.id);
 
       res.json({ grade: result.grade, feedback: result.feedback });
@@ -398,14 +328,12 @@ async function startServer() {
       const { client, model } = getAiClient();
       const prompt = prompts.qaAssistant(context, question);
 
-      const enriched = enrichPromptWithFiles(prompt);
       const response = await client.chat.completions.create({
         model,
-        messages: [{ role: 'user', content: enriched.prompt }],
+        messages: [{ role: 'user', content: prompt }],
       });
 
       const answer = response.choices?.[0]?.message?.content?.trim() || '';
-      logAi({ userId: req.user.id, action: 'qa_chat', prompt: enriched.prompt, response: JSON.stringify(response) });
       res.json({ answer });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

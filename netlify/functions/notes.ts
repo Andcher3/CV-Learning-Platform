@@ -1,6 +1,6 @@
 import { Config } from "@netlify/functions";
 import db from './db';
-import { authenticate, getAiClient, logAiInteraction, enrichPromptWithFiles } from './utils';
+import { authenticate, getAiClient } from './utils';
 import { prompts } from '../../server/prompts';
 import fs from 'fs';
 import path from 'path';
@@ -56,14 +56,12 @@ export default async (req: Request) => {
           const { client, model } = getAiClient();
           const prompt = prompts.adjustPlan(unit, plan, content, fileUrl);
 
-          const enriched = enrichPromptWithFiles(prompt);
           const response = await client.chat.completions.create({
             model,
-            messages: [{ role: 'user', content: enriched.prompt }],
+            messages: [{ role: 'user', content: prompt }],
           });
 
           const newPlanContent = response.choices?.[0]?.message?.content?.trim() || plan.plan_content;
-          logAiInteraction({ userId: user.id, unitId, action: 'plan_adjust', prompt: enriched.prompt, response: JSON.stringify(response) });
           db.prepare('UPDATE study_plans SET plan_content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newPlanContent, plan.id);
         }
       } catch (err) {

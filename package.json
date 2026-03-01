@@ -27,7 +27,6 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.546.0",
-    "marked": "^14.1.4",
     "motion": "^12.23.24",
     "multer": "^2.1.0",
     "openai": "^4.83.0",
