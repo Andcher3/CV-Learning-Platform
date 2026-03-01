@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save } from 'lucide-react';
+import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save, FileText } from 'lucide-react';
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'users' | 'settings'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'records' | 'settings'>('users');
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
@@ -28,6 +28,12 @@ export default function AdminDashboard() {
             <Users className="w-5 h-5 mr-3" /> 学生账户管理
           </button>
           <button
+            onClick={() => setActiveTab('records')}
+            className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg ${activeTab === 'records' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-100'}`}
+          >
+            <FileText className="w-5 h-5 mr-3" /> 学习记录
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg ${activeTab === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-100'}`}
           >
@@ -44,7 +50,7 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <div className="flex-1 p-8 overflow-y-auto">
-        {activeTab === 'users' ? <UsersManagement /> : <AISettings />}
+        {activeTab === 'users' ? <UsersManagement /> : activeTab === 'records' ? <AdminRecords /> : <AISettings />}
       </div>
     </div>
   );
@@ -168,6 +174,146 @@ function UsersManagement() {
             </form>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function AdminRecords() {
+  const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+  const [notes, setNotes] = useState<any[]>([]);
+  const [plans, setPlans] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const resolveFileUrl = (fileUrl: string | null) => {
+    if (!fileUrl) return '';
+    if (fileUrl.startsWith('http')) return fileUrl;
+    return `${API_BASE_URL}${fileUrl}`;
+  };
+
+  const loadData = () => {
+    setLoading(true);
+    Promise.all([
+      fetch(`${API_BASE_URL}/api/admin/notes`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json()),
+      fetch(`${API_BASE_URL}/api/admin/plans`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json())
+    ])
+      .then(([notesData, plansData]) => {
+        setNotes(notesData);
+        setPlans(plansData);
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const formatDate = (value?: string) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  };
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">学习记录</h2>
+          <p className="text-slate-500 mt-1">管理员可查看所有学生提交的历史笔记和学习计划，并下载附件。</p>
+        </div>
+        <button onClick={loadData} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">刷新</button>
+      </div>
+
+      {loading ? (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 text-slate-500">加载中...</div>
+      ) : (
+        <>
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">学习笔记</h3>
+                <p className="text-sm text-slate-500">查看全部学生的笔记内容、附件与评分。</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">单元</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">周次</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">提交时间</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">评分</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">附件</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">内容摘要</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-slate-200">
+                  {notes.map((note: any) => (
+                    <tr key={note.id}>
+                      <td className="px-4 py-3 text-sm text-slate-800">{note.student_username}</td>
+                      <td className="px-4 py-3 text-sm text-slate-800">{note.unit_title}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600">{note.week || '-'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(note.created_at)}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600">{note.grade ?? '-'}</td>
+                      <td className="px-4 py-3 text-sm text-indigo-600">
+                        {note.file_url ? (
+                          <a className="hover:underline" href={resolveFileUrl(note.file_url)} target="_blank" rel="noreferrer">下载</a>
+                        ) : (
+                          <span className="text-slate-400">无</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700 max-w-xs whitespace-pre-wrap">
+                        {note.content ? `${note.content.slice(0, 100)}${note.content.length > 100 ? '...' : ''}` : '无'}
+                      </td>
+                    </tr>
+                  ))}
+                  {notes.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-6 text-center text-slate-500">暂无笔记记录</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">学习计划</h3>
+                <p className="text-sm text-slate-500">按更新时间查看所有学生的学习计划。</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">单元</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">更新时间</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">计划内容</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-slate-200">
+                  {plans.map((plan: any) => (
+                    <tr key={plan.id}>
+                      <td className="px-4 py-3 text-sm text-slate-800">{plan.student_username}</td>
+                      <td className="px-4 py-3 text-sm text-slate-800">{plan.unit_title}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(plan.updated_at)}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700 whitespace-pre-wrap max-w-lg">{plan.plan_content}</td>
+                    </tr>
+                  ))}
+                  {plans.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-6 text-center text-slate-500">暂无学习计划</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

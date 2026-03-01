@@ -135,6 +135,29 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // Admin Records API
+  app.get('/api/admin/notes', authenticate, requireAdmin, (req: any, res: any) => {
+    const notes = db.prepare(`
+      SELECT n.*, u.username AS student_username, un.title AS unit_title
+      FROM notes n
+      JOIN users u ON n.student_id = u.id
+      JOIN units un ON n.unit_id = un.id
+      ORDER BY n.created_at DESC
+    `).all();
+    res.json(notes);
+  });
+
+  app.get('/api/admin/plans', authenticate, requireAdmin, (req: any, res: any) => {
+    const plans = db.prepare(`
+      SELECT p.*, u.username AS student_username, un.title AS unit_title
+      FROM study_plans p
+      JOIN users u ON p.student_id = u.id
+      JOIN units un ON p.unit_id = un.id
+      ORDER BY p.updated_at DESC
+    `).all();
+    res.json(plans);
+  });
+
   // Auth Routes
   app.post('/api/auth/login', (req, res) => {
     const { username, password } = req.body;

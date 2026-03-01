@@ -73,6 +73,29 @@ export default async (req: Request) => {
     }
   }
 
+  // Records API
+  if (url.pathname === '/api/admin/notes' && req.method === 'GET') {
+    const notes = db.prepare(`
+      SELECT n.*, u.username AS student_username, un.title AS unit_title
+      FROM notes n
+      JOIN users u ON n.student_id = u.id
+      JOIN units un ON n.unit_id = un.id
+      ORDER BY n.created_at DESC
+    `).all();
+    return new Response(JSON.stringify(notes));
+  }
+
+  if (url.pathname === '/api/admin/plans' && req.method === 'GET') {
+    const plans = db.prepare(`
+      SELECT p.*, u.username AS student_username, un.title AS unit_title
+      FROM study_plans p
+      JOIN users u ON p.student_id = u.id
+      JOIN units un ON p.unit_id = un.id
+      ORDER BY p.updated_at DESC
+    `).all();
+    return new Response(JSON.stringify(plans));
+  }
+
   return new Response('Not found', { status: 404 });
 };
 
