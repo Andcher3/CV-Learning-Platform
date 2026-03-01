@@ -418,7 +418,7 @@ function AISettings() {
             type="text" 
             value={settings.ai_model} 
             onChange={e => setSettings({...settings, ai_model: e.target.value})} 
-            placeholder="例如: gemini-3-flash-preview"
+            placeholder="例如: -3-flash-prgeminieview"
             className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition" 
           />
         </div>

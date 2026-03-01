@@ -85,7 +85,7 @@ if (!adminExists) {
 const defaultSettings = [
   { key: 'ai_api_key', value: '' },
   { key: 'ai_base_url', value: '' },
-  { key: 'ai_model', value: 'gemini-3-flash-preview' }
+  { key: 'ai_model', value: '' }
 ];
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
 for (const s of defaultSettings) {
