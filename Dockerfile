@@ -15,4 +15,4 @@ COPY . .
 EXPOSE 3000
 
 # 启动后端的命令
-CMD["npx", "tsx", "server.ts"]
+CMD ["npx", "tsx", "server.ts"]
