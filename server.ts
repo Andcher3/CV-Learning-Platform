@@ -13,12 +13,16 @@ import { prompts } from './server/prompts';
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const PLAN_DIR = path.join(DATA_DIR, 'plan');
+const NOTES_DIR = path.join(DATA_DIR, 'notes');
 const MAX_FILE_PREVIEW = 8000;
 
 // Ensure uploads directory exists
 const uploadsDir = process.env.UPLOADS_DIR || path.join(DATA_DIR, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
+}
+if (!fs.existsSync(NOTES_DIR)) {
+  fs.mkdirSync(NOTES_DIR, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -41,6 +45,7 @@ async function startServer() {
 
   app.use(express.json());
   app.use('/uploads', express.static(uploadsDir));
+  app.use('/notes', express.static(NOTES_DIR));
 
   if (!fs.existsSync(PLAN_DIR)) {
     fs.mkdirSync(PLAN_DIR, { recursive: true });
@@ -66,7 +71,33 @@ async function startServer() {
   };
 
   // Disabled plan file persistence per user request (was saving markdown to /data/plan)
-  const savePlanFile = (_studentId: number, _unitId: number, _content: string) => null;
+  const savePlanFile = (studentId: number, unitId: number, content: string) => {
+    if (!content?.trim()) return null;
+    if (!fs.existsSync(PLAN_DIR)) {
+      fs.mkdirSync(PLAN_DIR, { recursive: true });
+    }
+
+    const prefix = `plan-s${studentId}-u${unitId}-p`;
+    const files = fs.readdirSync(PLAN_DIR);
+    let maxVersion = 0;
+    for (const file of files) {
+      if (!file.startsWith(prefix) || !file.endsWith('.md')) continue;
+      const matched = file.match(/-p(\d+)\.md$/);
+      const version = matched ? Number(matched[1]) : 0;
+      if (version > maxVersion) maxVersion = version;
+    }
+
+    const nextVersion = maxVersion + 1;
+    const filename = `${prefix}${nextVersion}.md`;
+    const absolutePath = path.join(PLAN_DIR, filename);
+    fs.writeFileSync(absolutePath, content, 'utf-8');
+
+    return {
+      filename,
+      filepath: absolutePath,
+      version: nextVersion
+    };
+  };
 
   const buildPromptWithFiles = (basePrompt: string) => {
     const match = basePrompt.match(/FILES:\s*([^\n]+)/i);
@@ -352,7 +383,25 @@ ${content}`);
 
   app.post('/api/notes', authenticate, upload.single('file'), async (req: any, res: any) => {
     const { unitId, week, content } = req.body;
-    const fileUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    const existingNotesCount = db.prepare('SELECT COUNT(*) as count FROM notes WHERE student_id = ? AND unit_id = ?').get(req.user.id, unitId) as { count: number };
+    const noteVersion = Number(existingNotesCount?.count || 0) + 1;
+
+    const noteContentFilename = `note-s${req.user.id}-u${unitId}-n${noteVersion}.md`;
+    const noteContentPath = path.join(NOTES_DIR, noteContentFilename);
+    const noteContentForFile = (content || '').trim() || '（本次仅提交了附件，未填写文字内容）';
+    fs.writeFileSync(noteContentPath, noteContentForFile, 'utf-8');
+
+    let fileUrl = null;
+    if (req.file) {
+      const originalExt = path.extname(req.file.originalname || '').toLowerCase();
+      const ext = originalExt || '.bin';
+      const filename = `note-s${req.user.id}-u${unitId}-n${noteVersion}-file${ext}`;
+      const fromPath = req.file.path;
+      const toPath = path.join(NOTES_DIR, filename);
+      fs.renameSync(fromPath, toPath);
+      fileUrl = `/notes/${filename}`;
+    }
+
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
 

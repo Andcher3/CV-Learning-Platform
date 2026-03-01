@@ -5,8 +5,36 @@ import { prompts } from '../../server/prompts';
 import fs from 'fs';
 import path from 'path';
 
-// Plan file persistence disabled for troubleshooting
-const savePlanFile = (_studentId: number, _unitId: number, _content: string) => null;
+const DATA_DIR = process.env.DATA_DIR || '/data';
+const PLAN_DIR = path.join(DATA_DIR, 'plan');
+
+const savePlanFile = (studentId: number, unitId: number, content: string) => {
+  if (!content?.trim()) return null;
+  if (!fs.existsSync(PLAN_DIR)) {
+    fs.mkdirSync(PLAN_DIR, { recursive: true });
+  }
+
+  const prefix = `plan-s${studentId}-u${unitId}-p`;
+  const files = fs.readdirSync(PLAN_DIR);
+  let maxVersion = 0;
+  for (const file of files) {
+    if (!file.startsWith(prefix) || !file.endsWith('.md')) continue;
+    const matched = file.match(/-p(\d+)\.md$/);
+    const version = matched ? Number(matched[1]) : 0;
+    if (version > maxVersion) maxVersion = version;
+  }
+
+  const nextVersion = maxVersion + 1;
+  const filename = `${prefix}${nextVersion}.md`;
+  const absolutePath = path.join(PLAN_DIR, filename);
+  fs.writeFileSync(absolutePath, content, 'utf-8');
+
+  return {
+    filename,
+    filepath: absolutePath,
+    version: nextVersion
+  };
+};
 
 export default async (req: Request) => {
   const url = new URL(req.url);
