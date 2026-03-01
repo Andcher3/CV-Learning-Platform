@@ -43,6 +43,9 @@ export const buildPromptWithFiles = (basePrompt: string) => {
   const fileBlocks: string[] = [];
   const usedFiles: string[] = [];
   const dataRoot = path.resolve(DATA_DIR);
+  const allowedTextExt = new Set(['.md', '.txt', '.json', '.csv', '.yaml', '.yml']);
+  const maxTextBytes = 512 * 1024;
+  const maxBinaryBytes = 5 * 1024 * 1024; // attachments up to 5MB (not inlined)
 
   for (const filePath of files) {
     const resolved = path.isAbsolute(filePath)
@@ -52,9 +55,19 @@ export const buildPromptWithFiles = (basePrompt: string) => {
     if (!resolved.startsWith(dataRoot)) continue;
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) continue;
 
-    const content = fs.readFileSync(resolved, 'utf-8').slice(0, MAX_FILE_PREVIEW);
-    fileBlocks.push(`[文件: ${resolved}]\n${content}`);
-    usedFiles.push(resolved);
+    const ext = path.extname(resolved).toLowerCase();
+    const stat = fs.statSync(resolved);
+
+    if (allowedTextExt.has(ext) && stat.size <= maxTextBytes) {
+      const content = fs.readFileSync(resolved, 'utf-8').slice(0, MAX_FILE_PREVIEW);
+      fileBlocks.push(`[文件: ${resolved}]\n${content}`);
+      usedFiles.push(resolved);
+    } else if (stat.size <= maxBinaryBytes) {
+      fileBlocks.push(`[二进制文件(未内联): ${resolved}] 大小: ${stat.size} bytes。请将该文件视为外部附件，无法直接内联。`);
+      usedFiles.push(resolved);
+    } else {
+      fileBlocks.push(`[文件: ${resolved}] (跳过附件，原因: 非文本且超过限制)`);
+    }
   }
 
   const appended = fileBlocks.length > 0 ? `\n\n[附加文件内容]\n${fileBlocks.join('\n\n')}` : '';
