@@ -16,7 +16,7 @@ const PLAN_DIR = path.join(DATA_DIR, 'plan');
 const MAX_FILE_PREVIEW = 8000;
 
 // Ensure uploads directory exists
-const uploadsDir = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
+const uploadsDir = process.env.UPLOADS_DIR || path.join(DATA_DIR, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
@@ -58,7 +58,8 @@ async function startServer() {
     }
 
     const baseURL = config.ai_base_url || process.env.AI_BASE_URL || 'https://api.gptsapi.net/v1';
-    const client = new OpenAI({ apiKey, baseURL, timeout: 30000, maxRetries: 2 });
+    const timeoutMs = Number(process.env.AI_TIMEOUT_MS || 60000);
+    const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 2 });
     const model = config.ai_model || process.env.AI_MODEL || 'gpt-4o-mini';
 
     return { client, model };
@@ -283,7 +284,7 @@ ${content}`);
       }
       const { prompt, files } = buildPromptWithFiles(basePrompt);
 
-      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 30000);
+      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 60000);
       const maxCompletionTokens = Number(process.env.AI_PLAN_MAX_TOKENS || 1600);
 
       const callAiWithTimeout = async (userPrompt: string) => {

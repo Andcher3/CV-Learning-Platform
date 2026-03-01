@@ -47,7 +47,7 @@ export default async (req: Request) => {
       }
       const { prompt, files } = buildPromptWithFiles(basePrompt);
 
-      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 30000);
+      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 60000);
       const aiCall = client.chat.completions.create(
         {
           model,

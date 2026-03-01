@@ -1,9 +1,15 @@
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import path from 'path';
+import fs from 'fs';
 
-// In Netlify functions, the working directory is usually the function directory or project root.
-const dbPath = path.resolve(process.cwd(), 'database.sqlite');
+const defaultDataDir = process.platform === 'win32' ? process.cwd() : '/data';
+const dbPath = process.env.DATABASE_PATH || process.env.DB_PATH || path.join(process.env.DATA_DIR || defaultDataDir, 'database.sqlite');
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+console.log('[db] sqlite path:', dbPath);
 const db = new Database(dbPath);
 
 // Initialize tables
