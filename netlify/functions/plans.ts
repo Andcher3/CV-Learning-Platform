@@ -46,6 +46,8 @@ export default async (req: Request) => {
       const response = await client.chat.completions.create({
         model,
         messages: [{ role: 'user', content: prompt }],
+        max_tokens: 800, // keep generations concise to avoid timeouts
+        temperature: 0.7,
       });
 
       const planContent = response.choices?.[0]?.message?.content?.trim() || '无法生成计划';
@@ -69,5 +71,6 @@ export default async (req: Request) => {
 };
 
 export const config: Config = {
-  path: "/api/plans*"
+  path: "/api/plans*",
+  maxDuration: 60
 };

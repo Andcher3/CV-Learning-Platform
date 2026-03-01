@@ -30,7 +30,8 @@ export const getAiClient = () => {
   }
   
   const baseURL = config.ai_base_url || process.env.AI_BASE_URL || 'https://api.gptsapi.net/v1';
-  const client = new OpenAI({ apiKey, baseURL, timeout: 30000, maxRetries: 2 });
+  const timeoutMs = Number(process.env.AI_TIMEOUT_MS || 60000);
+  const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 2 });
   const model = config.ai_model || process.env.AI_MODEL || 'gpt-4o-mini';
 
   return { client, model };
