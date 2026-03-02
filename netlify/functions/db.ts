@@ -61,6 +61,14 @@ db.exec(`
     FOREIGN KEY(unit_id) REFERENCES units(id)
   );
 
+  CREATE TABLE IF NOT EXISTS feedbacks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(student_id) REFERENCES users(id)
+  );
+
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL

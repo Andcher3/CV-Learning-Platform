@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save, FileText } from 'lucide-react';
+import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save, FileText, MessageSquare } from 'lucide-react';
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'users' | 'records' | 'settings'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'records' | 'feedbacks' | 'settings'>('users');
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
@@ -39,6 +39,12 @@ export default function AdminDashboard() {
           >
             <Settings className="w-5 h-5 mr-3" /> AI 配置
           </button>
+          <button
+            onClick={() => setActiveTab('feedbacks')}
+            className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg ${activeTab === 'feedbacks' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-100'}`}
+          >
+            <MessageSquare className="w-5 h-5 mr-3" /> 学生反馈
+          </button>
         </nav>
         <button
           onClick={() => navigate('/dashboard')}
@@ -50,7 +56,7 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <div className="flex-1 p-8 overflow-y-auto">
-        {activeTab === 'users' ? <UsersManagement /> : activeTab === 'records' ? <AdminRecords /> : <AISettings />}
+        {activeTab === 'users' ? <UsersManagement /> : activeTab === 'records' ? <AdminRecords /> : activeTab === 'feedbacks' ? <AdminFeedbacks /> : <AISettings />}
       </div>
     </div>
   );
@@ -387,6 +393,79 @@ function AdminRecords() {
             </div>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+function AdminFeedbacks() {
+  const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+  const [feedbacks, setFeedbacks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadFeedbacks = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/feedbacks`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      const data = await res.json();
+      setFeedbacks(Array.isArray(data) ? data : []);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadFeedbacks();
+  }, []);
+
+  const formatDate = (value?: string) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">学生反馈</h2>
+          <p className="text-slate-500 mt-1">查看学生提交的平台改进建议。</p>
+        </div>
+        <button onClick={loadFeedbacks} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">刷新</button>
+      </div>
+
+      {loading ? (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 text-slate-500">加载中...</div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">提交时间</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">反馈内容</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-slate-200">
+                {feedbacks.map((item: any) => (
+                  <tr key={item.id}>
+                    <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{item.student_username}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.created_at)}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700 whitespace-pre-wrap">{item.content}</td>
+                  </tr>
+                ))}
+                {feedbacks.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-6 text-center text-slate-500">暂无学生反馈</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );

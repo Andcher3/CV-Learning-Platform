@@ -426,6 +426,16 @@ async function startServer() {
     res.json(plans);
   });
 
+  app.get('/api/admin/feedbacks', authenticate, requireAdmin, (req: any, res: any) => {
+    const feedbacks = db.prepare(`
+      SELECT f.*, u.username AS student_username
+      FROM feedbacks f
+      JOIN users u ON f.student_id = u.id
+      ORDER BY f.created_at DESC
+    `).all();
+    res.json(feedbacks);
+  });
+
   // Auth Routes
   app.post('/api/auth/login', (req, res) => {
     const { username, password } = req.body;
@@ -484,6 +494,16 @@ async function startServer() {
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(req.params.id);
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
     res.json(unit);
+  });
+
+  app.post('/api/feedback', authenticate, (req: any, res: any) => {
+    const text = String(req.body?.content || '').trim();
+    if (!text) {
+      return res.status(400).json({ error: '反馈内容不能为空' });
+    }
+
+    const result = db.prepare('INSERT INTO feedbacks (student_id, content) VALUES (?, ?)').run(req.user.id, text);
+    res.json({ id: result.lastInsertRowid, message: '反馈提交成功' });
   });
 
   // Study Plans

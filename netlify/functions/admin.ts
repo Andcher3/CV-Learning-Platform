@@ -179,6 +179,16 @@ export default async (req: Request) => {
     return new Response(JSON.stringify(plans));
   }
 
+  if (url.pathname === '/api/admin/feedbacks' && req.method === 'GET') {
+    const feedbacks = db.prepare(`
+      SELECT f.*, u.username AS student_username
+      FROM feedbacks f
+      JOIN users u ON f.student_id = u.id
+      ORDER BY f.created_at DESC
+    `).all();
+    return new Response(JSON.stringify(feedbacks));
+  }
+
   return new Response('Not found', { status: 404 });
 };
 

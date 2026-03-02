@@ -12,6 +12,10 @@ export default function Dashboard() {
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackError, setFeedbackError] = useState('');
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
@@ -86,6 +90,45 @@ export default function Dashboard() {
     }
   };
 
+  const handleSubmitFeedback = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFeedbackError('');
+    setFeedbackMessage('');
+
+    const content = feedbackText.trim();
+    if (!content) {
+      setFeedbackError('请先填写反馈内容');
+      return;
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    setFeedbackLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/feedback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ content }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '提交失败');
+
+      setFeedbackMessage(data.message || '反馈提交成功');
+      setFeedbackText('');
+    } catch (err: any) {
+      setFeedbackError(err.message || '提交失败');
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50">
       <nav className="bg-white shadow-sm border-b border-slate-200">
@@ -129,6 +172,33 @@ export default function Dashboard() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+          <h2 className="text-xl font-semibold text-slate-900">平台改进反馈</h2>
+          <p className="text-slate-600 mt-1 text-sm">欢迎提交你对平台功能和体验的改进建议，管理员会在后台查看。</p>
+
+          {feedbackError && <div className="mt-3 bg-red-50 text-red-600 p-2 rounded text-sm">{feedbackError}</div>}
+          {feedbackMessage && <div className="mt-3 bg-green-50 text-green-700 p-2 rounded text-sm">{feedbackMessage}</div>}
+
+          <form onSubmit={handleSubmitFeedback} className="mt-4">
+            <textarea
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              rows={4}
+              placeholder="例如：希望增加学习进度可视化、优化移动端排版、补充更多实践案例..."
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <div className="mt-3 flex justify-end">
+              <button
+                type="submit"
+                disabled={feedbackLoading}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {feedbackLoading ? '提交中...' : '提交反馈'}
+              </button>
+            </div>
+          </form>
+        </div>
+
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-900">课程单元</h1>
           <p className="text-slate-600 mt-2">按照顺序完成以下单元的学习任务。</p>
