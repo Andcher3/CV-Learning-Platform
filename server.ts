@@ -193,6 +193,22 @@ async function startServer() {
       const ext = path.extname(resolved).toLowerCase();
       const stat = fs.statSync(resolved);
 
+      if (allowedTextExt.has(ext) && stat.size <= maxTextBytes) {
+        const content = fs.readFileSync(resolved, 'utf-8').slice(0, MAX_FILE_PREVIEW);
+        fileBlocks.push(`[文件: ${resolved}]\n${content}`);
+        usedFiles.push(resolved);
+        continue;
+      }
+
+      if (ext === '.pdf') {
+        const fallbackPdfText = await tryExtractPdfLocally(resolved);
+        if (fallbackPdfText) {
+          fileBlocks.push(`[文件: ${resolved}][本地PDF提取]\n${fallbackPdfText}`);
+          usedFiles.push(resolved);
+          continue;
+        }
+      }
+
       if (stat.size <= maxBinaryBytes && client) {
         const extractedText = await extractBinaryFileText(client, resolved);
         if (extractedText) {
@@ -202,11 +218,7 @@ async function startServer() {
         }
       }
 
-      if (allowedTextExt.has(ext) && stat.size <= maxTextBytes) {
-        const content = fs.readFileSync(resolved, 'utf-8').slice(0, MAX_FILE_PREVIEW);
-        fileBlocks.push(`[文件: ${resolved}]\n${content}`);
-        usedFiles.push(resolved);
-      } else if (path.extname(resolved).toLowerCase() === '.pdf') {
+      if (path.extname(resolved).toLowerCase() === '.pdf') {
         const fallbackPdfText = await tryExtractPdfLocally(resolved);
         if (fallbackPdfText) {
           fileBlocks.push(`[文件: ${resolved}][本地PDF提取]\n${fallbackPdfText}`);

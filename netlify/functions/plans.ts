@@ -151,9 +151,12 @@ export default async (req: Request) => {
       if (pretestQuestion || knowledgeAnswer) {
         basePrompt = prompts.buildPlanPrompt(basePrompt, pretestQuestion, knowledgeAnswer);
       }
+      const promptBuildStartedAt = Date.now();
       const { prompt, files } = await buildPromptWithFiles(basePrompt, client);
+      const prompt_build_ms = Date.now() - promptBuildStartedAt;
 
       const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 120000);
+      const aiStartedAt = Date.now();
       const aiCall = client.chat.completions.create(
         {
           model,
@@ -172,6 +175,7 @@ export default async (req: Request) => {
 
       const response = await Promise.race([aiCall, timeoutPromise]);
       if (timeoutId) clearTimeout(timeoutId);
+      const ai_elapsed_ms = Date.now() - aiStartedAt;
 
       const ai_raw = response.choices?.[0]?.message?.content || '';
       if (!ai_raw || !ai_raw.trim()) {
@@ -203,7 +207,7 @@ export default async (req: Request) => {
       const adjustCount = refreshed?.adjust_daily_date === todayKey ? Number(refreshed?.adjust_daily_count || 0) : 0;
 
       const elapsed_ms = Date.now() - startedAt;
-      console.log('[plans.generate] elapsed_ms=%d unitId=%s user=%s', elapsed_ms, unitId, user.id);
+      console.log('[plans.generate] elapsed_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d unitId=%s user=%s files=%d', elapsed_ms, prompt_build_ms, ai_elapsed_ms, unitId, user.id, files.length);
       return new Response(JSON.stringify({
         plan_content: planContent,
         prompt_preview: prompt,
