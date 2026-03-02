@@ -13,12 +13,6 @@ ${pretestQuestion || '（未读取到题目）'}
 ${pretestAnswer || '（未提供答案）'}
 
 当前已提供：测评题目与学生答案。
-${budgetJson ? `
-
-# 本单元预算协议（来自md解析/后端注入，硬约束）
-BUDGET(JSON):
-${budgetJson}
-` : ''}
 
 # 角色设定：首席学习审计官（单单元执行版）
 你现在的身份是我的“严格助教与动态审计员”。
@@ -35,15 +29,12 @@ ${budgetJson}
      - 若评级为 A（合格）：融合当前大纲与旧计划的合理节奏，输出兼顾理论与实操的标准看板。
      - 若评级为 C（崩盘）：拉满该单元的弹性工时上限；在前期插入“前置基础修补”任务，并将大任务拆成更细的步骤。
    - 禁止输出 Stage 0/1/2… 分阶段大纲式模板；禁止出现“审计结论与工时调整说明”这种引言段落；只输出任务表与工时汇总。
-3) 工时约束（按 md 的“总计工时：约X小时”执行，允许小幅超出）：
-   - 从预算协议读取 total_hours_target（“总计工时：约X小时”）。
+3) 工时约束（从读取到的 md ，找到类似找到“总计工时：约X小时”的段落，从中提取总计工时的具体时间(比如总计工时：约1小时，那么总计工时记为1h)）：
+   - 从预算协议读取 total_hours_target（也就是总计工时）。
    - 允许略超：total_hours 必须 <= soft_max_hours（= total_hours_target + tolerance_hours）。
    - 仅当评级为 C 时允许出现“弹性工时”，但 total_hours 仍必须 <= absolute_max_hours（默认 2× total_hours_target）。
    - 你必须为每个任务标注估算小时(h)，并在末尾输出 total_hours 与复算结论（是否满足 soft_max_hours / absolute_max_hours）。
-4) 输出时仅输出学习计划正文（Markdown），格式必须固定为两块：
-   A. 任务表（Markdown表格）：任务ID | 任务内容 | 输入材料/链接 | 交付物(可验收) | 估算h | 是否弹性
-   B. 工时汇总（1-3行）：total_hours=...h，并声明是否满足 soft_max_hours / absolute_max_hours。
-   除此之外不要输出任何审计评级、诊断或解释性文字。
+4) 输出时仅输出学习计划正文（Markdown），除此之外不要输出任何审计评级、诊断或解释性文字。
 5）自行检查是否满足上述的要求，如果不满足，请自我批评并重新输出。`,
 
   planRetry: (currentPrompt: string) => `${currentPrompt}
@@ -53,7 +44,7 @@ ${budgetJson}
   gradeRepair: () => `你上一条评分结果不是有效JSON。请严格仅返回一个JSON对象，不要输出任何额外文字：{"grade":85,"feedback":"..."}`,
 
   // 1. AI学习计划生成提示词
-  generatePlan: (unit: any, resourcesText: string, budget: any) => `
+  generatePlan: (unit: any, resourcesText: string) => `
 单元名称：${unit.title}
 学习时间：第${unit.week_range}周
 单元描述：${unit.description}
@@ -66,26 +57,6 @@ FILES: /data/admin/unit_plan/unit${unit.id}/${unit.id}. ${unit.title}.pdf,
 说明：
 - md文档：当前主计划大纲中的本单元任务（工时上限与任务清单以此为准）
 - pdf文件：参考变量（仅可借鉴任务形式/顺序/验收方式，不得引入额外大阶段模板，不得改变工时上限）
-
-# 本单元预算协议（硬约束，必须严格满足）
-BUDGET(JSON):
-${JSON.stringify(budget, null, 2)}
-
-执行规则（必须遵守）：
-1) 你最终只输出“计划正文”，不得输出解释或诊断。
-2) 输出格式必须固定为两块（Markdown）：
-   A. 任务表（Markdown表格）：任务ID | 任务内容 | 输入材料/链接 | 交付物(可验收) | 估算h | 是否弹性
-   B. 工时汇总（1-3行）：total_hours=...h，并声明是否满足 soft_max_hours / absolute_max_hours。
-3) 工时必须可校验：
-   - 每条任务必须标注“估算小时(h)”，末尾必须给出 total_hours 汇总（所有任务估算h求和）。
-   - total_hours 必须 <= budget.soft_max_hours（允许略超 total_hours_target，但不能超过 soft_max_hours）。
-   - 只有在评级为 C 时允许出现“弹性工时”（表格“是否弹性”为是），但 total_hours 仍必须 <= budget.absolute_max_hours。
-4) 估算规则（按预算协议执行）：
-   - 视频/阅读：标称时长 × budget.video_multiplier
-   - 编程/复现：标称时长 × budget.coding_multiplier
-   - 若资料未给标称时长，你必须给出保守估算，并优先删减低价值任务以满足 soft_max_hours。
-5) 禁止输出 Stage 0/1/2… 大纲式长计划模板；不得输出“审计结论与工时调整说明”等引言段。
-6) 参考pdf只允许影响“任务形式/顺序/验收方式”，不得增加本单元之外的任务，不得扩大预算。
 
 当前已提供：当前主计划大纲中的本单元任务与参考计划
 `,
