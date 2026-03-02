@@ -17,12 +17,23 @@ const NOTES_DIR = path.join(DATA_DIR, 'notes');
 const MAX_FILE_PREVIEW = 8000;
 const MAX_PLAN_GENERATIONS = Math.max(0, Number(process.env.MAX_PLAN_GENERATIONS || 3));
 const MAX_PLAN_ADJUSTMENTS = Math.max(0, Number(process.env.MAX_PLAN_ADJUSTMENTS || 3));
+const COURSE_START_UTC8_MS = Date.UTC(2026, 2, 1, 16, 0, 0);
+const WEEKDAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 const getTodayKey = () => {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const getCourseWeekdayLabel = (date: Date) => {
+  const utc8Ms = date.getTime() + 8 * 60 * 60 * 1000;
+  const diffDays = Math.floor((utc8Ms - COURSE_START_UTC8_MS) / (24 * 60 * 60 * 1000));
+  const safeDiffDays = Math.max(0, diffDays);
+  const week = Math.floor(safeDiffDays / 7) + 1;
+  const weekday = WEEKDAY_NAMES[safeDiffDays % 7];
+  return `第${week}周${weekday}`;
 };
 
 const getPretestFilePath = (unitId: number) => {
@@ -955,8 +966,10 @@ async function startServer() {
           const planUpdatedAt = plan.updated_at ? new Date(plan.updated_at) : null;
           const hoursSinceCreated = planCreatedAt ? Math.max(0, Math.floor((now.getTime() - planCreatedAt.getTime()) / 3600000)) : null;
           const hoursSinceUpdated = planUpdatedAt ? Math.max(0, Math.floor((now.getTime() - planUpdatedAt.getTime()) / 3600000)) : null;
+          const courseWeekdayLabel = getCourseWeekdayLabel(now);
           const progressContext = [
             `当前时间: ${now.toISOString()}`,
+            `教学日历定位: ${courseWeekdayLabel}（按2026-03-02为第一周周一计算）`,
             `本次笔记提交序号: 第${noteVersion}次`,
             `本次笔记提交周次字段: ${week || '未知'}`,
             `原计划创建时间: ${plan.created_at || '未知'}`,
