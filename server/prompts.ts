@@ -140,7 +140,7 @@ ${payload.latestNote}
 
 判定标准：
 1) 结合当前时间、计划任务推进节奏、最近笔记证据，估算学生当前落后天数 lag_days（整数，可为0）。
-2) 若 lag_days >= 1，必须判定 should_remind=true。
+2) 若 lag_days >= 4，必须判定 should_remind=true。
 3) status 只允许：on_track（正常/超前）、slightly_behind（轻度滞后）、seriously_behind（严重滞后）。
 4) reason 用1-2句话解释依据，必须引用“时间+计划+笔记”三者中的关键信息。
 5) suggestion 给出一句可执行提醒文案，面向学生。
