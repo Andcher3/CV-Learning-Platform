@@ -618,7 +618,6 @@ async function startServer() {
           model,
           messages: [{ role: 'user', content: userPrompt }],
           max_tokens: maxCompletionTokens,
-          temperature: 1,
           thinking: { type: 'disabled' },
         };
 
