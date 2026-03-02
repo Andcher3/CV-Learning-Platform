@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save, FileText, MessageSquare } from 'lucide-react';
 
@@ -82,7 +82,7 @@ function UsersManagement() {
     fetchUsers();
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const url = editingUser ? `${API_BASE_URL}/api/admin/users/${editingUser.id}` : `${API_BASE_URL}/api/admin/users`;
     const method = editingUser ? 'PUT' : 'POST';
@@ -262,7 +262,10 @@ function AdminRecords() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [notes, setNotes] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
+  const [progressRows, setProgressRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [checkingProgress, setCheckingProgress] = useState(false);
+  const [progressMessage, setProgressMessage] = useState('');
 
   const resolveFileUrl = (fileUrl: string | null) => {
     if (!fileUrl) return '';
@@ -274,13 +277,36 @@ function AdminRecords() {
     setLoading(true);
     Promise.all([
       fetch(`${API_BASE_URL}/api/admin/notes`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json()),
-      fetch(`${API_BASE_URL}/api/admin/plans`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json())
+      fetch(`${API_BASE_URL}/api/admin/plans`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json()),
+      fetch(`${API_BASE_URL}/api/admin/progress`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json())
     ])
-      .then(([notesData, plansData]) => {
+      .then(([notesData, plansData, progressData]) => {
         setNotes(notesData);
         setPlans(plansData);
+        setProgressRows(Array.isArray(progressData) ? progressData : []);
       })
       .finally(() => setLoading(false));
+  };
+
+  const handleCheckAllProgress = async () => {
+    setCheckingProgress(true);
+    setProgressMessage('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/progress/check-all`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '检测失败');
+      }
+      setProgressRows(Array.isArray(data?.results) ? data.results : []);
+      setProgressMessage(`检测完成：共 ${data?.total ?? 0} 名学生，需提醒 ${data?.remind_count ?? 0} 人。`);
+    } catch (err: any) {
+      setProgressMessage(err?.message || '检测失败');
+    } finally {
+      setCheckingProgress(false);
+    }
   };
 
   useEffect(() => {
@@ -300,13 +326,69 @@ function AdminRecords() {
           <h2 className="text-2xl font-bold text-slate-900">学习记录</h2>
           <p className="text-slate-500 mt-1">管理员可查看所有学生提交的历史笔记和学习计划，并下载附件。</p>
         </div>
-        <button onClick={loadData} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">刷新</button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleCheckAllProgress}
+            disabled={checkingProgress}
+            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition disabled:opacity-50"
+          >
+            {checkingProgress ? '检测中...' : '主动检测全体进度'}
+          </button>
+          <button onClick={loadData} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">刷新</button>
+        </div>
       </div>
+      {progressMessage && <div className="text-sm text-slate-600">{progressMessage}</div>}
 
       {loading ? (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 text-slate-500">加载中...</div>
       ) : (
         <>
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">学生进度滞后检测</h3>
+                <p className="text-sm text-slate-500">展示每位学生最新一次进度评估结果。</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">状态</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">滞后天数</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">提醒</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">检测时间</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">原因</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-slate-200">
+                  {progressRows.map((item: any, idx: number) => (
+                    <tr key={`${item.student_id}-${idx}`}>
+                      <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{item.student_username || item.student_id}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{item.status || '-'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{Number(item.lag_days || 0)}</td>
+                      <td className="px-4 py-3 text-sm whitespace-nowrap">
+                        {item.should_remind ? (
+                          <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-xs font-semibold">需要提醒</span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">正常</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.checked_at)}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700 max-w-md whitespace-pre-wrap">{item.reason || '-'}</td>
+                    </tr>
+                  ))}
+                  {progressRows.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-6 text-center text-slate-500">暂无进度检测结果</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
               <div>

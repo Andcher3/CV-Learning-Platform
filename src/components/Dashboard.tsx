@@ -16,6 +16,8 @@ export default function Dashboard() {
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackError, setFeedbackError] = useState('');
+  const [progressReminder, setProgressReminder] = useState<any>(null);
+  const [showProgressReminder, setShowProgressReminder] = useState(false);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
@@ -32,6 +34,20 @@ export default function Dashboard() {
       .then(res => res.json())
       .then(data => setUnits(data))
       .catch(console.error);
+
+    if (user.role === 'student') {
+      fetch(`${API_BASE_URL}/api/progress/reminder`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          setProgressReminder(data);
+          if (data?.should_remind) {
+            setShowProgressReminder(true);
+          }
+        })
+        .catch(console.error);
+    }
   }, [navigate]);
 
   const handleLogout = () => {
@@ -301,6 +317,31 @@ export default function Dashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showProgressReminder && progressReminder && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-lg rounded-2xl p-6 shadow-xl border border-rose-200">
+            <h3 className="text-lg font-semibold text-rose-700 mb-2">学习进度提醒</h3>
+            <p className="text-sm text-slate-600 mb-3">
+              检测时间：{progressReminder.checked_at ? new Date(progressReminder.checked_at).toLocaleString() : '-'}
+              {progressReminder.course_weekday ? `（${progressReminder.course_weekday}）` : ''}
+            </p>
+            <div className="bg-rose-50 border border-rose-100 rounded-lg p-3 text-sm text-rose-700 mb-3">
+              当前估计进度滞后 <strong>{Number(progressReminder.lag_days || 0)}</strong> 天。
+            </div>
+            <p className="text-sm text-slate-700 mb-2"><strong>原因：</strong>{progressReminder.reason || '暂无'}</p>
+            <p className="text-sm text-slate-700"><strong>建议：</strong>{progressReminder.suggestion || '请及时对照计划补齐学习任务。'}</p>
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={() => setShowProgressReminder(false)}
+                className="px-4 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition"
+              >
+                我知道了
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -78,6 +78,26 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS progress_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL,
+    day_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    lag_days INTEGER NOT NULL DEFAULT 0,
+    should_remind INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    suggestion TEXT,
+    checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    trigger_source TEXT NOT NULL DEFAULT 'daily-auto',
+    course_weekday TEXT,
+    plan_id INTEGER,
+    note_id INTEGER,
+    detail_json TEXT,
+    FOREIGN KEY(student_id) REFERENCES users(id),
+    FOREIGN KEY(plan_id) REFERENCES study_plans(id),
+    FOREIGN KEY(note_id) REFERENCES notes(id)
+  );
 `);
 
 // Add columns if they don't exist (for existing db)

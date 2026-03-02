@@ -269,6 +269,160 @@ async function startServer() {
     return null;
   };
 
+  const parseAiJsonObject = (raw: string) => {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    const withoutFence = trimmed
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    const candidates = [withoutFence];
+    const objectMatch = withoutFence.match(/\{[\s\S]*\}/);
+    if (objectMatch) candidates.push(objectMatch[0]);
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object') return parsed as any;
+      } catch (err) {}
+    }
+    return null;
+  };
+
+  const normalizeProgressStatus = (value: string) => {
+    const raw = String(value || '').trim();
+    if (raw === 'seriously_behind' || raw === 'slightly_behind' || raw === 'on_track') return raw;
+    if (raw.includes('serious') || raw.includes('严重')) return 'seriously_behind';
+    if (raw.includes('slight') || raw.includes('轻')) return 'slightly_behind';
+    return 'on_track';
+  };
+
+  const evaluateStudentProgress = async (studentId: number, triggerSource: string = 'daily-auto') => {
+    const now = new Date();
+    const dayKey = getTodayKey();
+    const courseWeekday = getCourseWeekdayLabel(now);
+
+    const latestPlan = db.prepare(`
+      SELECT p.*, u.title AS unit_title
+      FROM study_plans p
+      LEFT JOIN units u ON u.id = p.unit_id
+      WHERE p.student_id = ?
+      ORDER BY COALESCE(p.updated_at, p.created_at) DESC, p.id DESC
+      LIMIT 1
+    `).get(studentId) as any;
+
+    const latestNote = db.prepare(`
+      SELECT n.*, u.title AS unit_title
+      FROM notes n
+      LEFT JOIN units u ON u.id = n.unit_id
+      WHERE n.student_id = ?
+      ORDER BY n.created_at DESC, n.id DESC
+      LIMIT 1
+    `).get(studentId) as any;
+
+    if (!latestPlan) {
+      const fallback = {
+        student_id: studentId,
+        day_key: dayKey,
+        status: 'on_track',
+        lag_days: 0,
+        should_remind: 0,
+        reason: '当前暂无学习计划，暂不进行滞后提醒判定。',
+        suggestion: '请先生成学习计划，然后系统会自动跟踪进度。',
+        checked_at: now.toISOString(),
+        trigger_source: triggerSource,
+        course_weekday: courseWeekday,
+        plan_id: null,
+        note_id: latestNote?.id || null,
+        detail_json: JSON.stringify({ fallback: true, no_plan: true })
+      };
+      db.prepare(`
+        INSERT INTO progress_checks (student_id, day_key, status, lag_days, should_remind, reason, suggestion, trigger_source, course_weekday, plan_id, note_id, detail_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        fallback.student_id,
+        fallback.day_key,
+        fallback.status,
+        fallback.lag_days,
+        fallback.should_remind,
+        fallback.reason,
+        fallback.suggestion,
+        fallback.trigger_source,
+        fallback.course_weekday,
+        fallback.plan_id,
+        fallback.note_id,
+        fallback.detail_json
+      );
+      return fallback;
+    }
+
+    const { client, model } = getAiClient();
+    const auditPrompt = prompts.progressAudit({
+      nowIso: now.toISOString(),
+      courseWeekday,
+      latestPlan: String(latestPlan?.plan_content || '无').slice(0, 6000),
+      latestPlanUpdatedAt: latestPlan?.updated_at || latestPlan?.created_at || '未知',
+      latestPlanUnit: latestPlan?.unit_title || `单元${latestPlan?.unit_id || ''}`,
+      latestNote: String(latestNote?.content || '（该生暂无笔记）').slice(0, 4000),
+      latestNoteCreatedAt: latestNote?.created_at || '无',
+      latestNoteUnit: latestNote?.unit_title || (latestNote ? `单元${latestNote?.unit_id}` : '无')
+    });
+
+    const response = await client.chat.completions.create({
+      model,
+      messages: [{ role: 'user', content: auditPrompt }],
+      max_tokens: 1200,
+    } as any);
+    const aiRaw = response.choices?.[0]?.message?.content?.trim() || '';
+    const parsed = parseAiJsonObject(aiRaw) || {};
+
+    const lagDaysRaw = Number(parsed?.lag_days);
+    const lagDays = Number.isFinite(lagDaysRaw) ? Math.max(0, Math.floor(lagDaysRaw)) : 0;
+    const status = normalizeProgressStatus(String(parsed?.status || 'on_track'));
+    const shouldRemindByAi = parsed?.should_remind === true || String(parsed?.should_remind).toLowerCase() === 'true';
+    const shouldRemind = lagDays >= 4 || status === 'seriously_behind' || shouldRemindByAi;
+    const reason = String(parsed?.reason || '未提供明确原因').trim() || '未提供明确原因';
+    const suggestion = String(parsed?.suggestion || '请及时对照计划补齐最近几天的核心任务。').trim() || '请及时对照计划补齐最近几天的核心任务。';
+
+    const result = {
+      student_id: studentId,
+      day_key: dayKey,
+      status,
+      lag_days: lagDays,
+      should_remind: shouldRemind ? 1 : 0,
+      reason,
+      suggestion,
+      checked_at: now.toISOString(),
+      trigger_source: triggerSource,
+      course_weekday: courseWeekday,
+      plan_id: latestPlan?.id || null,
+      note_id: latestNote?.id || null,
+      detail_json: JSON.stringify({ ai_raw: aiRaw })
+    };
+
+    db.prepare(`
+      INSERT INTO progress_checks (student_id, day_key, status, lag_days, should_remind, reason, suggestion, trigger_source, course_weekday, plan_id, note_id, detail_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      result.student_id,
+      result.day_key,
+      result.status,
+      result.lag_days,
+      result.should_remind,
+      result.reason,
+      result.suggestion,
+      result.trigger_source,
+      result.course_weekday,
+      result.plan_id,
+      result.note_id,
+      result.detail_json
+    );
+
+    return result;
+  };
+
   // Auth Middleware
   const authenticate = (req: any, res: any, next: any) => {
     const token = req.headers.authorization?.split(' ')[1];
@@ -459,6 +613,73 @@ async function startServer() {
     res.json(feedbacks);
   });
 
+  app.get('/api/admin/progress', authenticate, requireAdmin, (req: any, res: any) => {
+    const rows = db.prepare(`
+      SELECT pc.*, u.username AS student_username
+      FROM progress_checks pc
+      JOIN users u ON u.id = pc.student_id
+      WHERE pc.id IN (
+        SELECT MAX(id)
+        FROM progress_checks
+        GROUP BY student_id
+      )
+      ORDER BY pc.should_remind DESC, pc.lag_days DESC, pc.id DESC
+    `).all() as any[];
+    const normalized = rows.map((row) => ({
+      ...row,
+      should_remind: Number(row.should_remind || 0) === 1,
+      lag_days: Number(row.lag_days || 0)
+    }));
+    res.json(normalized);
+  });
+
+  app.post('/api/admin/progress/check-all', authenticate, requireAdmin, async (req: any, res: any) => {
+    try {
+      const students = db.prepare("SELECT id, username FROM users WHERE role = 'student' ORDER BY id ASC").all() as any[];
+      const results: any[] = [];
+
+      for (const student of students) {
+        try {
+          const checked = await evaluateStudentProgress(Number(student.id), 'manual-admin');
+          results.push({
+            student_id: student.id,
+            student_username: student.username,
+            status: checked.status,
+            lag_days: checked.lag_days,
+            should_remind: Number(checked.should_remind || 0) === 1,
+            reason: checked.reason,
+            suggestion: checked.suggestion,
+            checked_at: checked.checked_at,
+            trigger_source: checked.trigger_source,
+            course_weekday: checked.course_weekday
+          });
+        } catch (err: any) {
+          results.push({
+            student_id: student.id,
+            student_username: student.username,
+            status: 'error',
+            lag_days: 0,
+            should_remind: false,
+            reason: err?.message || '检测失败',
+            suggestion: '',
+            checked_at: new Date().toISOString(),
+            trigger_source: 'manual-admin',
+            course_weekday: getCourseWeekdayLabel(new Date())
+          });
+        }
+      }
+
+      const remindCount = results.filter(item => item.should_remind).length;
+      res.json({
+        total: students.length,
+        remind_count: remindCount,
+        results
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || '批量检测失败' });
+    }
+  });
+
   // Auth Routes
   app.post('/api/auth/login', (req, res) => {
     const { username, password } = req.body;
@@ -527,6 +748,53 @@ async function startServer() {
 
     const result = db.prepare('INSERT INTO feedbacks (student_id, content) VALUES (?, ?)').run(req.user.id, text);
     res.json({ id: result.lastInsertRowid, message: '反馈提交成功' });
+  });
+
+  app.get('/api/progress/reminder', authenticate, async (req: any, res: any) => {
+    try {
+      const dayKey = getTodayKey();
+      const latestToday = db.prepare(`
+        SELECT * FROM progress_checks
+        WHERE student_id = ? AND day_key = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(req.user.id, dayKey) as any;
+
+      const checked = latestToday || await evaluateStudentProgress(Number(req.user.id), 'daily-auto');
+      res.json({
+        checked_at: checked.checked_at,
+        day_key: checked.day_key,
+        status: checked.status,
+        lag_days: Number(checked.lag_days || 0),
+        should_remind: Number(checked.should_remind || 0) === 1,
+        reason: checked.reason,
+        suggestion: checked.suggestion,
+        trigger_source: checked.trigger_source,
+        course_weekday: checked.course_weekday,
+        from_cache: Boolean(latestToday)
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || '进度检测失败' });
+    }
+  });
+
+  app.post('/api/progress/check', authenticate, async (req: any, res: any) => {
+    try {
+      const checked = await evaluateStudentProgress(Number(req.user.id), 'manual-student');
+      res.json({
+        checked_at: checked.checked_at,
+        day_key: checked.day_key,
+        status: checked.status,
+        lag_days: Number(checked.lag_days || 0),
+        should_remind: Number(checked.should_remind || 0) === 1,
+        reason: checked.reason,
+        suggestion: checked.suggestion,
+        trigger_source: checked.trigger_source,
+        course_weekday: checked.course_weekday
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || '进度检测失败' });
+    }
   });
 
   // Study Plans
