@@ -113,9 +113,14 @@ export default async (req: Request) => {
       const { client, model } = getAiClient();
       const existing = db.prepare('SELECT id, generate_count, adjust_count, pretest_answer FROM study_plans WHERE student_id = ? AND unit_id = ?').get(user.id, unitId) as any;
       const trimmedPretestAnswer = typeof pretestAnswer === 'string' ? pretestAnswer.trim() : '';
+      const pretestFilePath = resolvePretestFilePath(Number(unitId));
+      const pretestQuestion = fs.existsSync(pretestFilePath) ? fs.readFileSync(pretestFilePath, 'utf-8').trim() : '';
 
       if (!existing && !trimmedPretestAnswer) {
         return new Response(JSON.stringify({ error: '首次生成学习计划前，请先完成预设测评题并提交答案。' }), { status: 400 });
+      }
+      if (!existing && !pretestQuestion) {
+        return new Response(JSON.stringify({ error: '首次生成学习计划前，未找到该单元的预设测评题文件。' }), { status: 400 });
       }
 
       let basePrompt = clientPrompt as string | undefined;
@@ -132,8 +137,8 @@ export default async (req: Request) => {
       }
 
       const knowledgeAnswer = trimmedPretestAnswer || String(existing?.pretest_answer || '').trim();
-      if (knowledgeAnswer) {
-        basePrompt = `${basePrompt}\n\n[学生基础水平测评答案]\n${knowledgeAnswer}\n\n请根据学生的基础知识水平制定学习计划：基础薄弱则补充基础概念与练习；基础较好则增加挑战任务与进阶资源。`;
+      if (pretestQuestion || knowledgeAnswer) {
+        basePrompt = `${basePrompt}\n\n[学生基础水平测评题目]\n${pretestQuestion || '（未读取到题目）'}\n\n[学生基础水平测评答案]\n${knowledgeAnswer || '（未提供答案）'}\n\n请结合“测评题目 + 学生答案”判断学生的基础知识水平并制定学习计划：基础薄弱则补充基础概念与练习；基础较好则增加挑战任务与进阶资源。`;
       }
       const { prompt, files } = await buildPromptWithFiles(basePrompt, client);
 
