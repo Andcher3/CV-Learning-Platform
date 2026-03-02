@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { MessageSquare, Send, Bot, User, X, ChevronRight, ChevronLeft } from 'lucide-react';
 
-export default function SidebarAI({ context }: { context: string }) {
+export default function SidebarAI({ context, unitId }: { context: string; unitId?: string }) {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [isOpen, setIsOpen] = useState(true);
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([]);
@@ -29,7 +29,7 @@ export default function SidebarAI({ context }: { context: string }) {
       const res = await fetch(`${API_BASE_URL}/api/ai/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ question: userMsg, context }),
+        body: JSON.stringify({ question: userMsg, context, unitId }),
       });
       const data = await res.json();
       setMessages((prev) => [...prev, { role: 'ai', content: data.answer }]);

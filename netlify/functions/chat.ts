@@ -1,20 +1,33 @@
 import { Config } from "@netlify/functions";
 import { authenticate, getAiClient, buildPromptWithFiles } from './utils';
 import { prompts } from '../../server/prompts';
+import db from './db';
 
 export default async (req: Request) => {
   const url = new URL(req.url);
+  let user;
   try {
-    authenticate(req);
+    user = authenticate(req);
   } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message }), { status: 401 });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/ai/chat') {
-    const { question, context } = await req.json();
+    const { question, context, unitId } = await req.json();
     try {
       const { client, model } = getAiClient();
-      const basePrompt = prompts.qaAssistant(context, question);
+      let latestNoteContext = '';
+      if (unitId) {
+        const latestNote = db.prepare('SELECT content, file_url, created_at FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(user.id, unitId) as any;
+        if (latestNote) {
+          latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n提交时间：${latestNote.created_at || '未知'}\n笔记内容：${latestNote.content || '无'}\n是否有附件：${latestNote.file_url ? `是（${latestNote.file_url}）` : '否'}\n`;
+        } else {
+          latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n当前无笔记记录。\n`;
+        }
+      }
+
+      const mergedContext = `${context || ''}${latestNoteContext}`;
+      const basePrompt = prompts.qaAssistant(mergedContext, question);
       const { prompt, files } = buildPromptWithFiles(basePrompt);
 
       const response = await client.chat.completions.create({

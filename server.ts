@@ -297,6 +297,31 @@ ${content}`);
     }
   });
 
+  app.post('/api/auth/change-password', authenticate, (req: any, res: any) => {
+    const { oldPassword, newPassword } = req.body || {};
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ error: '请输入旧密码和新密码' });
+    }
+
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({ error: '新密码至少需要6位' });
+    }
+
+    const currentUser = db.prepare('SELECT id, password FROM users WHERE id = ?').get(req.user.id) as any;
+    if (!currentUser) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    const oldPasswordMatched = bcrypt.compareSync(oldPassword, currentUser.password);
+    if (!oldPasswordMatched) {
+      return res.status(400).json({ error: '旧密码不正确' });
+    }
+
+    const newPasswordHash = bcrypt.hashSync(newPassword, 10);
+    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(newPasswordHash, req.user.id);
+    return res.json({ success: true, message: '密码修改成功' });
+  });
+
   // Units
   app.get('/api/units', (req, res) => {
     const units = db.prepare('SELECT * FROM units').all();
@@ -531,10 +556,21 @@ ${content}`);
 
   // AI Assistant Chat
   app.post('/api/ai/chat', authenticate, async (req: any, res: any) => {
-    const { question, context } = req.body;
+    const { question, context, unitId } = req.body;
     try {
       const { client, model } = getAiClient();
-      const basePrompt = prompts.qaAssistant(context, question);
+      let latestNoteContext = '';
+      if (unitId) {
+        const latestNote = db.prepare('SELECT content, file_url, created_at FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any;
+        if (latestNote) {
+          latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n提交时间：${latestNote.created_at || '未知'}\n笔记内容：${latestNote.content || '无'}\n是否有附件：${latestNote.file_url ? `是（${latestNote.file_url}）` : '否'}\n`;
+        } else {
+          latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n当前无笔记记录。\n`;
+        }
+      }
+
+      const mergedContext = `${context || ''}${latestNoteContext}`;
+      const basePrompt = prompts.qaAssistant(mergedContext, question);
       const { prompt, files } = buildPromptWithFiles(basePrompt);
 
       const response = await client.chat.completions.create({
