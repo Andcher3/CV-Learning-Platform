@@ -4,6 +4,15 @@ import { ArrowLeft, FileText, CheckCircle, Clock, BookOpen, MessageSquare, Send,
 import SidebarAI from './SidebarAI';
 import { marked } from 'marked';
 
+const unwrapOuterMarkdownFence = (text: string) => {
+  const raw = String(text || '').trim();
+  const matched = raw.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i);
+  if (matched) {
+    return matched[1].trim();
+  }
+  return text || '';
+};
+
 export default function UnitDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -27,7 +36,10 @@ export default function UnitDetail() {
   const [submittingPretest, setSubmittingPretest] = useState(false);
   const [planStreamStatus, setPlanStreamStatus] = useState('');
   const [noteStreamStatus, setNoteStreamStatus] = useState('');
-  const renderedPlan = useMemo(() => marked.parse(plan?.plan_content || ''), [plan?.plan_content]);
+  const renderedPlan = useMemo(() => {
+    const normalized = unwrapOuterMarkdownFence(plan?.plan_content || '');
+    return marked.parse(normalized);
+  }, [plan?.plan_content]);
   const renderedPretestQuestion = useMemo(() => marked.parse(pretestQuestion || ''), [pretestQuestion]);
 
   const consumeEventStream = async (
