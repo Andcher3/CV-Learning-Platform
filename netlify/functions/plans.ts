@@ -153,7 +153,7 @@ export default async (req: Request) => {
       }
       const { prompt, files } = await buildPromptWithFiles(basePrompt, client);
 
-      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 60000);
+      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 120000);
       const aiCall = client.chat.completions.create(
         {
           model,
@@ -236,5 +236,5 @@ export default async (req: Request) => {
 
 export const config: Config = {
   path: "/api/plans*",
-  maxDuration: 60
+  maxDuration: 120
 };

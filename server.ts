@@ -583,7 +583,7 @@ async function startServer() {
       }
       const { prompt, files } = await buildPromptWithFiles(basePrompt, client);
 
-      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 60000);
+      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 120000);
       const maxCompletionTokens = Number(process.env.AI_PLAN_MAX_TOKENS || 4800);
 
       const callAiWithTimeout = async (userPrompt: string) => {
