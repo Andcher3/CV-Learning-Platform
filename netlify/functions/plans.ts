@@ -10,6 +10,23 @@ const PLAN_DIR = path.join(DATA_DIR, 'plan');
 const MAX_PLAN_GENERATIONS = Math.max(0, Number(process.env.MAX_PLAN_GENERATIONS || 3));
 const MAX_PLAN_ADJUSTMENTS = Math.max(0, Number(process.env.MAX_PLAN_ADJUSTMENTS || 3));
 
+const getPretestFilePath = (unitId: number) => {
+  const folder = path.join(DATA_DIR, `unit_plan_unit${unitId}`);
+  const filename = `unit${unitId}plantest.md`;
+  return path.join(folder, filename);
+};
+
+const resolvePretestFilePath = (unitId: number) => {
+  const primary = getPretestFilePath(unitId);
+  if (fs.existsSync(primary)) return primary;
+
+  const localDataRoot = path.join(process.cwd(), 'data');
+  const fallback = path.join(localDataRoot, `unit_plan_unit${unitId}`, `unit${unitId}plantest.md`);
+  if (fs.existsSync(fallback)) return fallback;
+
+  return primary;
+};
+
 const savePlanFile = (studentId: number, unitId: number, content: string) => {
   if (!content?.trim()) return null;
   if (!fs.existsSync(PLAN_DIR)) {
@@ -48,6 +65,23 @@ export default async (req: Request) => {
   }
 
   if (req.method === 'GET') {
+    const pretestMatch = url.pathname.match(/^\/api\/plans\/pretest\/(\d+)$/);
+    if (pretestMatch) {
+      const unitId = Number(pretestMatch[1]);
+      const unit = db.prepare('SELECT id FROM units WHERE id = ?').get(unitId);
+      if (!unit) {
+        return new Response(JSON.stringify({ error: 'Unit not found' }), { status: 404 });
+      }
+
+      const filePath = resolvePretestFilePath(unitId);
+      if (!fs.existsSync(filePath)) {
+        return new Response(JSON.stringify({ error: 'Pretest file not found' }), { status: 404 });
+      }
+
+      const question = fs.readFileSync(filePath, 'utf-8');
+      return new Response(JSON.stringify({ unit_id: unitId, question, file_path: filePath }));
+    }
+
     const match = url.pathname.match(/^\/api\/plans\/(\d+)$/);
     if (match) {
       const plan = db.prepare('SELECT * FROM study_plans WHERE student_id = ? AND unit_id = ?').get(user.id, match[1]) as any;
@@ -70,13 +104,20 @@ export default async (req: Request) => {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/plans/generate') {
-    const { unitId, prompt: clientPrompt } = await req.json();
+    const { unitId, prompt: clientPrompt, pretestAnswer } = await req.json();
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
     if (!unit) return new Response(JSON.stringify({ error: 'Unit not found' }), { status: 404 });
 
     try {
       const startedAt = Date.now();
       const { client, model } = getAiClient();
+      const existing = db.prepare('SELECT id, generate_count, adjust_count, pretest_answer FROM study_plans WHERE student_id = ? AND unit_id = ?').get(user.id, unitId) as any;
+      const trimmedPretestAnswer = typeof pretestAnswer === 'string' ? pretestAnswer.trim() : '';
+
+      if (!existing && !trimmedPretestAnswer) {
+        return new Response(JSON.stringify({ error: '首次生成学习计划前，请先完成预设测评题并提交答案。' }), { status: 400 });
+      }
+
       let basePrompt = clientPrompt as string | undefined;
       if (!basePrompt) {
         let resourcesText = '无';
@@ -88,6 +129,11 @@ export default async (req: Request) => {
         } catch (e) {}
 
         basePrompt = prompts.generatePlan(unit, resourcesText);
+      }
+
+      const knowledgeAnswer = trimmedPretestAnswer || String(existing?.pretest_answer || '').trim();
+      if (knowledgeAnswer) {
+        basePrompt = `${basePrompt}\n\n[学生基础水平测评答案]\n${knowledgeAnswer}\n\n请根据学生的基础知识水平制定学习计划：基础薄弱则补充基础概念与练习；基础较好则增加挑战任务与进阶资源。`;
       }
       const { prompt, files } = await buildPromptWithFiles(basePrompt, client);
 
@@ -118,7 +164,6 @@ export default async (req: Request) => {
       }
       const planContent = ai_raw.trim();
       
-      const existing = db.prepare('SELECT id, generate_count, adjust_count FROM study_plans WHERE student_id = ? AND unit_id = ?').get(user.id, unitId) as any;
       const currentGenerateCount = Number(existing?.generate_count || 0);
       if (currentGenerateCount >= MAX_PLAN_GENERATIONS) {
         return new Response(JSON.stringify({
@@ -130,9 +175,9 @@ export default async (req: Request) => {
       }
 
       if (existing) {
-        db.prepare('UPDATE study_plans SET plan_content = ?, generate_count = COALESCE(generate_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE student_id = ? AND unit_id = ?').run(planContent, user.id, unitId);
+        db.prepare(`UPDATE study_plans SET plan_content = ?, generate_count = COALESCE(generate_count, 0) + 1, pretest_answer = COALESCE(NULLIF(?, ''), pretest_answer), pretest_submitted_at = CASE WHEN TRIM(COALESCE(?, '')) <> '' THEN CURRENT_TIMESTAMP ELSE pretest_submitted_at END, updated_at = CURRENT_TIMESTAMP WHERE student_id = ? AND unit_id = ?`).run(planContent, trimmedPretestAnswer, trimmedPretestAnswer, user.id, unitId);
       } else {
-        db.prepare('INSERT INTO study_plans (student_id, unit_id, plan_content, generate_count, adjust_count) VALUES (?, ?, ?, ?, ?)').run(user.id, unitId, planContent, 1, 0);
+        db.prepare('INSERT INTO study_plans (student_id, unit_id, plan_content, generate_count, adjust_count, pretest_answer, pretest_submitted_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)').run(user.id, unitId, planContent, 1, 0, trimmedPretestAnswer);
       }
 
       const refreshed = db.prepare('SELECT generate_count, adjust_count FROM study_plans WHERE student_id = ? AND unit_id = ?').get(user.id, unitId) as any;

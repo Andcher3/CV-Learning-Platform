@@ -42,6 +42,8 @@ db.exec(`
     plan_content TEXT NOT NULL,
     generate_count INTEGER NOT NULL DEFAULT 0,
     adjust_count INTEGER NOT NULL DEFAULT 0,
+    pretest_answer TEXT,
+    pretest_submitted_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(student_id) REFERENCES users(id),
@@ -86,6 +88,16 @@ try {
 }
 try {
   db.exec("ALTER TABLE study_plans ADD COLUMN adjust_count INTEGER NOT NULL DEFAULT 0");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE study_plans ADD COLUMN pretest_answer TEXT");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE study_plans ADD COLUMN pretest_submitted_at DATETIME");
 } catch (e) {
   // Column might already exist
 }
