@@ -158,13 +158,22 @@ export default async (req: Request) => {
     if (req.method === 'POST') {
       const { settings } = await req.json();
       const updateStmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-      const updateMany = db.transaction((settingsList) => {
-        for (const s of settingsList) {
-          updateStmt.run(s.key, s.value);
-        }
+      const settingsList = Array.isArray(settings) ? settings : [];
+      const aiSettingKeys = new Set(['ai_api_key', 'ai_base_url', 'ai_model']);
+      const hasCustomAiValue = settingsList.some((item: any) => {
+        if (!item || !aiSettingKeys.has(item.key)) return false;
+        return String(item.value ?? '').trim().length > 0;
       });
-      updateMany(settings);
-      return new Response(JSON.stringify({ success: true }));
+
+      const updateMany = db.transaction((list: any[]) => {
+        for (const s of list) {
+          if (!s || typeof s.key !== 'string') continue;
+          updateStmt.run(s.key, String(s.value ?? ''));
+        }
+        updateStmt.run('ai_config_mode', hasCustomAiValue ? 'custom' : 'default');
+      });
+      updateMany(settingsList);
+      return new Response(JSON.stringify({ success: true, ai_config_mode: hasCustomAiValue ? 'custom' : 'default' }));
     }
   }
 

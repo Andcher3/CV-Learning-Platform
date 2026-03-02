@@ -26,15 +26,21 @@ export const getAiClient = () => {
   const config: Record<string, string> = {};
   settings.forEach(s => config[s.key] = typeof s.value === 'string' ? s.value.trim() : s.value);
 
-  const apiKey = config.ai_api_key || process.env.AI_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || 'sk-mnVcHeOzlSwmJ2zO4n8hFdR1E9jyOUjZMmy5HrzByC8uaKRb';
+  const defaultApiKey = process.env.AI_API_KEY || process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || 'sk-mnVcHeOzlSwmJ2zO4n8hFdR1E9jyOUjZMmy5HrzByC8uaKRb';
+  const defaultBaseURL = process.env.AI_BASE_URL || 'https://api.moonshot.cn/v1';
+  const defaultModel = process.env.AI_MODEL || 'kimi-k2.5';
+  const configMode = String(config.ai_config_mode || '').trim().toLowerCase();
+  const useCustomConfig = configMode === 'custom';
+
+  const apiKey = useCustomConfig ? (config.ai_api_key || defaultApiKey) : defaultApiKey;
   if (!apiKey) {
     throw new Error('API Key is missing. Please configure it in Admin Settings or environment variables.');
   }
   
-  const baseURL = config.ai_base_url || process.env.AI_BASE_URL || 'https://api.moonshot.cn/v1';
+  const baseURL = useCustomConfig ? (config.ai_base_url || defaultBaseURL) : defaultBaseURL;
   const timeoutMs = Number(process.env.AI_TIMEOUT_MS || 60000);
   const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 2 });
-  const model = config.ai_model || process.env.AI_MODEL || 'kimi-k2.5';
+  const model = useCustomConfig ? (config.ai_model || defaultModel) : defaultModel;
 
   return { client, model };
 };
