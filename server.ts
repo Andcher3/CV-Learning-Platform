@@ -834,6 +834,79 @@ async function startServer() {
 
   app.post('/api/notes', authenticate, upload.single('file'), async (req: any, res: any) => {
     const { unitId, week, content } = req.body;
+    const wantsStream = String(req.query?.stream || '') === '1' || String(req.headers.accept || '').includes('text/event-stream');
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    let streamEnded = false;
+    let clientDisconnected = false;
+
+    const sendSse = (event: string, payload: any) => {
+      if (!wantsStream || streamEnded || clientDisconnected) return;
+      try {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        if (typeof (res as any).flush === 'function') {
+          (res as any).flush();
+        }
+      } catch (err) {
+        clientDisconnected = true;
+      }
+    };
+
+    const closeSse = () => {
+      if (!wantsStream || streamEnded) return;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      streamEnded = true;
+      if (clientDisconnected) return;
+      try {
+        res.end();
+      } catch (err) {}
+    };
+
+    const respondError = (status: number, error: string) => {
+      if (wantsStream) {
+        sendSse('error', { error, status });
+        closeSse();
+        return;
+      }
+      res.status(status).json({ error });
+    };
+
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+
+      heartbeatTimer = setInterval(() => {
+        sendSse('ping', { ts: Date.now() });
+      }, 10000);
+
+      req.on('aborted', () => {
+        clientDisconnected = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+
+      res.on('close', () => {
+        clientDisconnected = true;
+        streamEnded = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+
+      sendSse('stage', { message: '正在保存笔记...' });
+    }
+
     const existingNotesCount = db.prepare('SELECT COUNT(*) as count FROM notes WHERE student_id = ? AND unit_id = ?').get(req.user.id, unitId) as { count: number };
     const noteVersion = Number(existingNotesCount?.count || 0) + 1;
 
@@ -854,7 +927,7 @@ async function startServer() {
     }
 
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
-    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+    if (!unit) return respondError(404, 'Unit not found');
 
     // Save note
     const result = db.prepare('INSERT INTO notes (student_id, unit_id, week, content, file_url) VALUES (?, ?, ?, ?, ?)').run(req.user.id, unitId, week, content || '', fileUrl);
@@ -863,6 +936,7 @@ async function startServer() {
     let adjustApplied = false;
     let adjustSkippedReason = '';
     let adjustCount = 0;
+    let adjustedPlanContent = '';
 
     // Adjust plan
     try {
@@ -874,6 +948,7 @@ async function startServer() {
         if (currentDailyAdjustCount >= MAX_PLAN_ADJUSTMENTS) {
           adjustSkippedReason = `今日根据笔记调整计划已达到上限（${MAX_PLAN_ADJUSTMENTS}次）`;
         } else {
+          sendSse('stage', { message: 'AI 正在根据最新笔记调整学习计划...' });
           const { client, model } = getAiClient();
           const now = new Date();
           const planCreatedAt = plan.created_at ? new Date(plan.created_at) : null;
@@ -900,17 +975,39 @@ async function startServer() {
           const adjustPromptWithFile = noteAttachmentPath ? `${baseAdjustPrompt}\nFILES: ${noteAttachmentPath}` : baseAdjustPrompt;
           const { prompt: adjustPrompt } = await buildPromptWithFiles(adjustPromptWithFile, client);
 
-          const response = await client.chat.completions.create({
-            model,
-            messages: [{ role: 'user', content: adjustPrompt }],
-          });
+          let newPlanContent = plan.plan_content;
+          if (wantsStream) {
+            let streamed = '';
+            const streamResponse: any = await client.chat.completions.create({
+              model,
+              messages: [{ role: 'user', content: adjustPrompt }],
+              stream: true,
+            } as any);
 
-          const newPlanContent = response.choices?.[0]?.message?.content?.trim() || plan.plan_content;
+            for await (const chunk of streamResponse as any) {
+              const delta = chunk?.choices?.[0]?.delta?.content;
+              if (typeof delta === 'string' && delta.length > 0) {
+                streamed += delta;
+                sendSse('delta', { content: delta });
+              }
+            }
+            if (streamed.trim()) {
+              newPlanContent = streamed.trim();
+            }
+          } else {
+            const response = await client.chat.completions.create({
+              model,
+              messages: [{ role: 'user', content: adjustPrompt }],
+            });
+            newPlanContent = response.choices?.[0]?.message?.content?.trim() || plan.plan_content;
+          }
+
           db.prepare('UPDATE study_plans SET plan_content = ?, adjust_count = COALESCE(adjust_count, 0) + 1, adjust_daily_count = CASE WHEN adjust_daily_date = ? THEN COALESCE(adjust_daily_count, 0) + 1 ELSE 1 END, adjust_daily_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newPlanContent, todayKey, todayKey, plan.id);
 
           savePlanFile(req.user.id, Number(unitId), newPlanContent);
           adjustApplied = true;
           adjustCount = currentDailyAdjustCount + 1;
+          adjustedPlanContent = newPlanContent;
         }
       } else {
         adjustSkippedReason = '当前单元尚未生成学习计划，已仅保存笔记';
@@ -920,16 +1017,26 @@ async function startServer() {
       adjustSkippedReason = '计划调整失败，已仅保存笔记';
     }
 
-    res.json({
+    const payload = {
       id: noteId,
       message: adjustApplied ? 'Note saved and plan adjusted' : 'Note saved',
       plan_adjusted: adjustApplied,
+      plan_content: adjustedPlanContent || undefined,
       adjust_skipped_reason: adjustSkippedReason,
       adjust_count: adjustCount,
       adjust_count_scope: 'daily',
       max_adjust_count: MAX_PLAN_ADJUSTMENTS,
       remaining_adjust_count: Math.max(0, MAX_PLAN_ADJUSTMENTS - adjustCount)
-    });
+    };
+
+    if (wantsStream) {
+      sendSse('final', payload);
+      sendSse('done', { ok: true });
+      closeSse();
+      return;
+    }
+
+    res.json(payload);
   });
 
   // Grade Unit

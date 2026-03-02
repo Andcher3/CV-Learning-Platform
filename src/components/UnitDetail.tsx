@@ -26,8 +26,77 @@ export default function UnitDetail() {
   const [loadingPretest, setLoadingPretest] = useState(false);
   const [submittingPretest, setSubmittingPretest] = useState(false);
   const [planStreamStatus, setPlanStreamStatus] = useState('');
+  const [noteStreamStatus, setNoteStreamStatus] = useState('');
   const renderedPlan = useMemo(() => marked.parse(plan?.plan_content || ''), [plan?.plan_content]);
   const renderedPretestQuestion = useMemo(() => marked.parse(pretestQuestion || ''), [pretestQuestion]);
+
+  const consumeEventStream = async (
+    res: Response,
+    handlers: {
+      onStage?: (payload: any) => void;
+      onDelta?: (payload: any) => void;
+      onFinal?: (payload: any) => void;
+      onError?: (payload: any) => void;
+    }
+  ) => {
+    if (!res.body) throw new Error('流式响应不可用');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    const processEventBlock = (rawBlock: string) => {
+      const lines = rawBlock.split('\n').map(line => line.trim()).filter(Boolean);
+      if (lines.length === 0) return;
+
+      let eventName = 'message';
+      const dataLines: string[] = [];
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+
+      let payload: any = {};
+      if (dataLines.length > 0) {
+        const dataText = dataLines.join('\n');
+        try {
+          payload = JSON.parse(dataText);
+        } catch (err) {
+          payload = { raw: dataText };
+        }
+      }
+
+      if (eventName === 'stage') {
+        handlers.onStage?.(payload);
+      } else if (eventName === 'delta') {
+        handlers.onDelta?.(payload);
+      } else if (eventName === 'final') {
+        handlers.onFinal?.(payload);
+      } else if (eventName === 'error') {
+        handlers.onError?.(payload);
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() || '';
+
+      for (const block of blocks) {
+        processEventBlock(block);
+      }
+    }
+
+    if (buffer.trim()) {
+      processEventBlock(buffer);
+    }
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -68,74 +137,22 @@ export default function UnitDetail() {
 
       const contentType = res.headers.get('content-type') || '';
       if (contentType.includes('text/event-stream') && res.body) {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
         let finalPayload: any = null;
         let streamError = '';
-
-        const processEventBlock = (rawBlock: string) => {
-          const lines = rawBlock.split('\n').map(line => line.trim()).filter(Boolean);
-          if (lines.length === 0) return;
-
-          let eventName = 'message';
-          const dataLines: string[] = [];
-          for (const line of lines) {
-            if (line.startsWith('event:')) {
-              eventName = line.slice(6).trim();
-            } else if (line.startsWith('data:')) {
-              dataLines.push(line.slice(5).trim());
-            }
-          }
-
-          let payload: any = {};
-          if (dataLines.length > 0) {
-            const dataText = dataLines.join('\n');
-            try {
-              payload = JSON.parse(dataText);
-            } catch (err) {
-              payload = { raw: dataText };
-            }
-          }
-
-          if (eventName === 'stage') {
-            setPlanStreamStatus(String(payload?.message || 'AI 正在处理中...'));
-            return;
-          }
-
-          if (eventName === 'delta') {
+        await consumeEventStream(res, {
+          onStage: (payload) => setPlanStreamStatus(String(payload?.message || 'AI 正在处理中...')),
+          onDelta: (payload) => {
             const deltaText = String(payload?.content || '');
             if (!deltaText) return;
             setPlan((prev: any) => ({ ...(prev || {}), plan_content: `${prev?.plan_content || ''}${deltaText}` }));
-            return;
-          }
-
-          if (eventName === 'final') {
+          },
+          onFinal: (payload) => {
             finalPayload = payload;
-            return;
-          }
-
-          if (eventName === 'error') {
+          },
+          onError: (payload) => {
             streamError = String(payload?.error || '学习计划生成失败');
           }
-        };
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const blocks = buffer.split('\n\n');
-          buffer = blocks.pop() || '';
-
-          for (const block of blocks) {
-            processEventBlock(block);
-          }
-        }
-
-        if (buffer.trim()) {
-          processEventBlock(buffer);
-        }
+        });
 
         if (streamError) {
           throw new Error(streamError);
@@ -208,10 +225,13 @@ export default function UnitDetail() {
 
     setSubmittingPretest(true);
     try {
-      await generatePlan(answer);
       setShowPretestModal(false);
+      await generatePlan(answer);
       setPretestQuestion('');
       setPretestAnswer('');
+    } catch (err) {
+      setShowPretestModal(true);
+      throw err;
     } finally {
       setSubmittingPretest(false);
     }
@@ -220,6 +240,9 @@ export default function UnitDetail() {
   const submitNote = async () => {
     if (!newNote.trim() && !file) return;
     setSubmittingNote(true);
+    setNoteStreamStatus('正在上传并保存笔记...');
+    setPlanActionError('');
+    setPlanActionMessage('');
     const token = localStorage.getItem('token');
     try {
       const formData = new FormData();
@@ -230,20 +253,57 @@ export default function UnitDetail() {
         formData.append('file', file);
       }
 
-      const noteRes = await fetch(`${API_BASE_URL}/api/notes`, {
+      const noteRes = await fetch(`${API_BASE_URL}/api/notes?stream=1`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Accept: 'text/event-stream',
+          Authorization: `Bearer ${token}`
+        },
         body: formData,
       });
-      const noteData = await noteRes.json();
-      if (!noteRes.ok) {
-        throw new Error(noteData?.error || '笔记提交失败');
+      const contentType = noteRes.headers.get('content-type') || '';
+      let noteData: any = null;
+
+      if (contentType.includes('text/event-stream') && noteRes.body) {
+        let streamError = '';
+        await consumeEventStream(noteRes, {
+          onStage: (payload) => {
+            setNoteStreamStatus(String(payload?.message || '正在处理中...'));
+          },
+          onDelta: (payload) => {
+            const deltaText = String(payload?.content || '');
+            if (!deltaText) return;
+            setPlan((prev: any) => ({ ...(prev || {}), plan_content: `${prev?.plan_content || ''}${deltaText}` }));
+          },
+          onFinal: (payload) => {
+            noteData = payload;
+          },
+          onError: (payload) => {
+            streamError = String(payload?.error || '笔记提交失败');
+          }
+        });
+
+        if (streamError) {
+          throw new Error(streamError);
+        }
+        if (!noteData) {
+          throw new Error('笔记提交失败：未收到最终结果');
+        }
+      } else {
+        noteData = await noteRes.json();
+        if (!noteRes.ok) {
+          throw new Error(noteData?.error || '笔记提交失败');
+        }
       }
+
       if (noteData?.plan_adjusted) {
         setPlanActionMessage(`已根据笔记更新计划。今日剩余可调整次数：${noteData.remaining_adjust_count ?? '-'} `);
         setPlanActionError('');
       } else if (noteData?.adjust_skipped_reason) {
         setPlanActionError(noteData.adjust_skipped_reason);
+      }
+      if (noteData?.plan_content) {
+        setPlan((prev: any) => ({ ...(prev || {}), plan_content: noteData.plan_content }));
       }
       setNewNote('');
       setFile(null);
@@ -258,7 +318,9 @@ export default function UnitDetail() {
         .then(data => setPlan(data));
     } catch (err) {
       console.error(err);
+      setPlanActionError(err instanceof Error ? err.message : '笔记提交失败');
     } finally {
+      setNoteStreamStatus('');
       setSubmittingNote(false);
     }
   };
@@ -415,6 +477,7 @@ export default function UnitDetail() {
             <div className="text-sm text-slate-500 mb-2">
               今日计划自动调整次数：{adjustCount}/{maxAdjustCount}（今日剩余 {remainingAdjustCount} 次）
             </div>
+            {submittingNote && noteStreamStatus && <div className="text-sm text-indigo-600 mb-2">{noteStreamStatus}</div>}
             <textarea
               value={newNote}
               onChange={(e) => setNewNote(e.target.value)}
