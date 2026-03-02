@@ -629,15 +629,22 @@ async function startServer() {
         }
       };
 
-      let response = await callAiWithTimeout(prompt);
-      aiElapsedMs = Date.now() - aiStartedAt;
+      let response;
+      try {
+        response = await callAiWithTimeout(prompt);
+      } finally {
+        aiElapsedMs += Date.now() - aiStartedAt;
+      }
       let ai_raw = response.choices?.[0]?.message?.content?.trim() || '';
 
       if (!ai_raw) {
         const retryPrompt = prompts.planRetry(prompt);
         const retryAiStartedAt = Date.now();
-        response = await callAiWithTimeout(retryPrompt);
-        aiElapsedMs += Date.now() - retryAiStartedAt;
+        try {
+          response = await callAiWithTimeout(retryPrompt);
+        } finally {
+          aiElapsedMs += Date.now() - retryAiStartedAt;
+        }
         ai_raw = response.choices?.[0]?.message?.content?.trim() || '';
       }
 
