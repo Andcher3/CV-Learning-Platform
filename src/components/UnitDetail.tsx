@@ -13,6 +13,8 @@ const unwrapOuterMarkdownFence = (text: string) => {
   return text || '';
 };
 
+const renderMarkdownHtml = (text: string) => marked.parse(unwrapOuterMarkdownFence(text || ''));
+
 export default function UnitDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -36,10 +38,7 @@ export default function UnitDetail() {
   const [submittingPretest, setSubmittingPretest] = useState(false);
   const [planStreamStatus, setPlanStreamStatus] = useState('');
   const [noteStreamStatus, setNoteStreamStatus] = useState('');
-  const renderedPlan = useMemo(() => {
-    const normalized = unwrapOuterMarkdownFence(plan?.plan_content || '');
-    return marked.parse(normalized);
-  }, [plan?.plan_content]);
+  const renderedPlan = useMemo(() => renderMarkdownHtml(plan?.plan_content || ''), [plan?.plan_content]);
   const renderedPretestQuestion = useMemo(() => marked.parse(pretestQuestion || ''), [pretestQuestion]);
 
   const consumeEventStream = async (
@@ -583,7 +582,19 @@ export default function UnitDetail() {
                       <div className="flex items-center mb-2">
                         <span className="bg-green-100 text-green-800 text-xs font-semibold px-2.5 py-0.5 rounded">评分: {note.grade}</span>
                       </div>
-                      <p className="text-sm text-slate-600"><strong>AI反馈:</strong> {note.feedback}</p>
+                      <div className="text-sm text-slate-600 mb-2"><strong>AI反馈:</strong></div>
+                      <div
+                        className="text-sm text-slate-700 leading-7
+                        [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2
+                        [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-2
+                        [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1
+                        [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2
+                        [&_li]:my-1 [&_a]:text-indigo-600 [&_a]:underline
+                        [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
+                        [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-3 [&_pre]:overflow-x-auto [&_pre]:my-3
+                        [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit"
+                        dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(note.feedback || '') as any }}
+                      />
                     </div>
                   )}
                 </div>

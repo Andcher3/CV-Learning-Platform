@@ -1119,6 +1119,79 @@ async function startServer() {
   // AI Assistant Chat
   app.post('/api/ai/chat', authenticate, async (req: any, res: any) => {
     const { question, context, unitId } = req.body;
+    const wantsStream = String(req.query?.stream || '') === '1' || String(req.headers.accept || '').includes('text/event-stream');
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    let streamEnded = false;
+    let clientDisconnected = false;
+
+    const sendSse = (event: string, payload: any) => {
+      if (!wantsStream || streamEnded || clientDisconnected) return;
+      try {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        if (typeof (res as any).flush === 'function') {
+          (res as any).flush();
+        }
+      } catch (err) {
+        clientDisconnected = true;
+      }
+    };
+
+    const closeSse = () => {
+      if (!wantsStream || streamEnded) return;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      streamEnded = true;
+      if (clientDisconnected) return;
+      try {
+        res.end();
+      } catch (err) {}
+    };
+
+    const respondError = (status: number, error: string) => {
+      if (wantsStream) {
+        sendSse('error', { error, status });
+        closeSse();
+        return;
+      }
+      res.status(status).json({ error });
+    };
+
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+
+      heartbeatTimer = setInterval(() => {
+        sendSse('ping', { ts: Date.now() });
+      }, 10000);
+
+      req.on('aborted', () => {
+        clientDisconnected = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+
+      res.on('close', () => {
+        clientDisconnected = true;
+        streamEnded = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+
+      sendSse('stage', { message: '正在组织问题上下文...' });
+    }
+
     try {
       const { client, model } = getAiClient();
       let latestNoteContext = '';
@@ -1142,7 +1215,31 @@ async function startServer() {
           : null;
       const basePrompt = prompts.qaAssistant(mergedContext, question);
       const promptWithAttachment = latestAttachmentFile ? `${basePrompt}\nFILES: ${latestAttachmentFile}` : basePrompt;
+      sendSse('stage', { message: '正在读取附件并生成回答...' });
       const { prompt, files } = await buildPromptWithFiles(promptWithAttachment, client);
+
+      if (wantsStream) {
+        let aiRaw = '';
+        const streamResponse: any = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          stream: true,
+        } as any);
+
+        for await (const chunk of streamResponse as any) {
+          const delta = chunk?.choices?.[0]?.delta?.content;
+          if (typeof delta === 'string' && delta.length > 0) {
+            aiRaw += delta;
+            sendSse('delta', { content: delta });
+          }
+        }
+
+        const answer = aiRaw.trim();
+        sendSse('final', { answer, prompt_preview: prompt, files_used: files, ai_raw: aiRaw });
+        sendSse('done', { ok: true });
+        closeSse();
+        return;
+      }
 
       const response = await client.chat.completions.create({
         model,
@@ -1153,7 +1250,7 @@ async function startServer() {
       const ai_raw = response.choices?.[0]?.message?.content || '';
       res.json({ answer, prompt_preview: prompt, files_used: files, ai_raw });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      respondError(500, err.message);
     }
   });
 
