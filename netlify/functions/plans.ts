@@ -157,14 +157,14 @@ export default async (req: Request) => {
 
       const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 120000);
       const aiStartedAt = Date.now();
-      const aiCall = client.chat.completions.create(
-        {
-          model,
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 600,
-          temperature: 1,
-        }
-      );
+      const requestBody: any = {
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 600,
+        temperature: 1,
+        thinking: { type: 'disabled' },
+      };
+      const aiCall = client.chat.completions.create(requestBody);
 
       let timeoutId: NodeJS.Timeout | null = null;
       const timeoutPromise = new Promise<never>((_, reject) => {

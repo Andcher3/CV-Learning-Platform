@@ -614,14 +614,17 @@ async function startServer() {
           timeoutId = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), aiTimeoutMs);
         });
 
+        const requestBody: any = {
+          model,
+          messages: [{ role: 'user', content: userPrompt }],
+          max_tokens: maxCompletionTokens,
+          temperature: 1,
+          thinking: { type: 'disabled' },
+        };
+
         try {
           return await Promise.race([
-            client.chat.completions.create({
-              model,
-              messages: [{ role: 'user', content: userPrompt }],
-              max_tokens: maxCompletionTokens,
-              temperature: 1,
-            }),
+            client.chat.completions.create(requestBody),
             timeoutPromise
           ]);
         } finally {
