@@ -562,6 +562,11 @@ async function startServer() {
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
 
+    let promptBuildMs = 0;
+    let aiElapsedMs = 0;
+    let promptLength = 0;
+    let filesCount = 0;
+
     try {
       const { client, model } = getAiClient();
       const existing = db.prepare('SELECT id, generate_count, adjust_count, pretest_answer FROM study_plans WHERE student_id = ? AND unit_id = ?').get(req.user.id, unitId) as any;
@@ -593,10 +598,15 @@ async function startServer() {
       if (pretestQuestion || knowledgeAnswer) {
         basePrompt = prompts.buildPlanPrompt(basePrompt, pretestQuestion, knowledgeAnswer);
       }
+      const promptBuildStartedAt = Date.now();
       const { prompt, files } = await buildPromptWithFiles(basePrompt, client);
+      promptBuildMs = Date.now() - promptBuildStartedAt;
+      promptLength = prompt.length;
+      filesCount = files.length;
 
       const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 120000);
       const maxCompletionTokens = Number(process.env.AI_PLAN_MAX_TOKENS || 4800);
+      const aiStartedAt = Date.now();
 
       const callAiWithTimeout = async (userPrompt: string) => {
         let timeoutId: NodeJS.Timeout | null = null;
@@ -620,11 +630,14 @@ async function startServer() {
       };
 
       let response = await callAiWithTimeout(prompt);
+      aiElapsedMs = Date.now() - aiStartedAt;
       let ai_raw = response.choices?.[0]?.message?.content?.trim() || '';
 
       if (!ai_raw) {
         const retryPrompt = prompts.planRetry(prompt);
+        const retryAiStartedAt = Date.now();
         response = await callAiWithTimeout(retryPrompt);
+        aiElapsedMs += Date.now() - retryAiStartedAt;
         ai_raw = response.choices?.[0]?.message?.content?.trim() || '';
       }
 
@@ -658,7 +671,7 @@ async function startServer() {
       const adjustCount = refreshed?.adjust_daily_date === todayKey ? Number(refreshed?.adjust_daily_count || 0) : 0;
 
       const elapsed_ms = Date.now() - startedAt;
-      console.log('[plans.generate] elapsed_ms=%d unitId=%s user=%s', elapsed_ms, unitId, req.user?.id);
+      console.log('[plans.generate] total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s', elapsed_ms, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id);
       res.json({
         plan_content: planContent,
         prompt_preview: prompt,
@@ -667,6 +680,8 @@ async function startServer() {
         plan_file: null,
         plan_version: null,
         elapsed_ms,
+        prompt_build_ms: promptBuildMs,
+        ai_elapsed_ms: aiElapsedMs,
         generate_count: generateCount,
         adjust_count_total: adjustCountTotal,
         adjust_count: adjustCount,
@@ -680,7 +695,8 @@ async function startServer() {
       const isTimeout = err?.message === 'AI_REQUEST_TIMEOUT';
       const status = isTimeout ? 504 : 500;
       const message = isTimeout ? 'AI generation timed out. Try again with shorter input.' : err?.message || 'Unknown error';
-      console.error('[plans.generate] error', message, err);
+      const elapsed_ms = Date.now() - startedAt;
+      console.error('[plans.generate] error total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s message=%s', elapsed_ms, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id, message, err);
       res.status(status).json({ error: message });
     }
   });
