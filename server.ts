@@ -625,7 +625,6 @@ async function startServer() {
       const adjustCountTotal = Number(refreshed?.adjust_count || 0);
       const adjustCount = refreshed?.adjust_daily_date === todayKey ? Number(refreshed?.adjust_daily_count || 0) : 0;
 
-      const saved = savePlanFile(req.user.id, Number(unitId), planContent);
       const elapsed_ms = Date.now() - startedAt;
       console.log('[plans.generate] elapsed_ms=%d unitId=%s user=%s', elapsed_ms, unitId, req.user?.id);
       res.json({
@@ -633,8 +632,8 @@ async function startServer() {
         prompt_preview: prompt,
         files_used: files,
         ai_raw,
-        plan_file: saved?.filepath,
-        plan_version: saved?.version,
+        plan_file: null,
+        plan_version: null,
         elapsed_ms,
         generate_count: generateCount,
         adjust_count_total: adjustCountTotal,

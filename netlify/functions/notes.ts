@@ -7,6 +7,7 @@ import path from 'path';
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const NOTES_DIR = path.join(DATA_DIR, 'notes');
+const PLAN_DIR = path.join(DATA_DIR, 'plan');
 const MAX_PLAN_ADJUSTMENTS = Math.max(0, Number(process.env.MAX_PLAN_ADJUSTMENTS || 3));
 const getTodayKey = () => {
   const now = new Date();
@@ -18,6 +19,34 @@ const getTodayKey = () => {
 if (!fs.existsSync(NOTES_DIR)) {
   fs.mkdirSync(NOTES_DIR, { recursive: true });
 }
+
+const savePlanFile = (studentId: number, unitId: number, content: string) => {
+  if (!content?.trim()) return null;
+  if (!fs.existsSync(PLAN_DIR)) {
+    fs.mkdirSync(PLAN_DIR, { recursive: true });
+  }
+
+  const prefix = `plan-s${studentId}-u${unitId}-p`;
+  const files = fs.readdirSync(PLAN_DIR);
+  let maxVersion = 0;
+  for (const file of files) {
+    if (!file.startsWith(prefix) || !file.endsWith('.md')) continue;
+    const matched = file.match(/-p(\d+)\.md$/);
+    const version = matched ? Number(matched[1]) : 0;
+    if (version > maxVersion) maxVersion = version;
+  }
+
+  const nextVersion = maxVersion + 1;
+  const filename = `${prefix}${nextVersion}.md`;
+  const absolutePath = path.join(PLAN_DIR, filename);
+  fs.writeFileSync(absolutePath, content, 'utf-8');
+
+  return {
+    filename,
+    filepath: absolutePath,
+    version: nextVersion
+  };
+};
 
 export default async (req: Request) => {
   const url = new URL(req.url);
@@ -115,6 +144,7 @@ export default async (req: Request) => {
 
             const newPlanContent = response.choices?.[0]?.message?.content?.trim() || plan.plan_content;
             db.prepare('UPDATE study_plans SET plan_content = ?, adjust_count = COALESCE(adjust_count, 0) + 1, adjust_daily_count = CASE WHEN adjust_daily_date = ? THEN COALESCE(adjust_daily_count, 0) + 1 ELSE 1 END, adjust_daily_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newPlanContent, todayKey, todayKey, plan.id);
+            savePlanFile(user.id, Number(unitId), newPlanContent);
             adjustApplied = true;
             adjustCount = currentDailyAdjustCount + 1;
           }
