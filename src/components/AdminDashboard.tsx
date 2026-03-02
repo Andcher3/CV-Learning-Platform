@@ -101,11 +101,19 @@ function UsersManagement() {
 
   const handleDelete = async (id: number) => {
     if (!confirm('确定要删除该用户吗？')) return;
-    await fetch(`${API_BASE_URL}/api/admin/users/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    });
-    fetchUsers();
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/users/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || '删除失败');
+      }
+      fetchUsers();
+    } catch (err: any) {
+      alert(err?.message || '删除失败');
+    }
   };
 
   const openEdit = (user: any) => {

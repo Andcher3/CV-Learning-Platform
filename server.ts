@@ -542,8 +542,37 @@ async function startServer() {
   });
 
   app.delete('/api/admin/users/:id', authenticate, requireAdmin, (req: any, res: any) => {
-    db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
-    res.json({ success: true });
+    const targetId = Number(req.params.id);
+    if (!Number.isFinite(targetId) || targetId <= 0) {
+      return res.status(400).json({ error: '无效的用户ID' });
+    }
+
+    const targetUser = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(targetId) as any;
+    if (!targetUser) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+    if (targetUser.username === 'admin' || targetUser.role === 'admin') {
+      return res.status(400).json({ error: '不能删除管理员账号' });
+    }
+
+    try {
+      const removeUser = db.transaction((studentId: number) => {
+        db.prepare('DELETE FROM progress_checks WHERE student_id = ?').run(studentId);
+        db.prepare('DELETE FROM feedbacks WHERE student_id = ?').run(studentId);
+        db.prepare('DELETE FROM notes WHERE student_id = ?').run(studentId);
+        db.prepare('DELETE FROM study_plans WHERE student_id = ?').run(studentId);
+        return db.prepare('DELETE FROM users WHERE id = ?').run(studentId);
+      });
+
+      const result = removeUser(targetId);
+      if (!result?.changes) {
+        return res.status(500).json({ error: '删除失败，未影响任何记录' });
+      }
+
+      res.json({ success: true, deleted_user_id: targetId });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || '删除失败' });
+    }
   });
 
   // Admin Settings API

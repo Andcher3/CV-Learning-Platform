@@ -117,8 +117,35 @@ export default async (req: Request) => {
       }
     }
     if (req.method === 'DELETE') {
-      db.prepare('DELETE FROM users WHERE id = ?').run(id);
-      return new Response(JSON.stringify({ success: true }));
+      const targetId = Number(id);
+      if (!Number.isFinite(targetId) || targetId <= 0) {
+        return new Response(JSON.stringify({ error: '无效的用户ID' }), { status: 400 });
+      }
+
+      const targetUser = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(targetId) as any;
+      if (!targetUser) {
+        return new Response(JSON.stringify({ error: '用户不存在' }), { status: 404 });
+      }
+      if (targetUser.username === 'admin' || targetUser.role === 'admin') {
+        return new Response(JSON.stringify({ error: '不能删除管理员账号' }), { status: 400 });
+      }
+
+      try {
+        const removeUser = db.transaction((studentId: number) => {
+          db.prepare('DELETE FROM progress_checks WHERE student_id = ?').run(studentId);
+          db.prepare('DELETE FROM feedbacks WHERE student_id = ?').run(studentId);
+          db.prepare('DELETE FROM notes WHERE student_id = ?').run(studentId);
+          db.prepare('DELETE FROM study_plans WHERE student_id = ?').run(studentId);
+          return db.prepare('DELETE FROM users WHERE id = ?').run(studentId);
+        });
+        const result = removeUser(targetId);
+        if (!result?.changes) {
+          return new Response(JSON.stringify({ error: '删除失败，未影响任何记录' }), { status: 500 });
+        }
+        return new Response(JSON.stringify({ success: true, deleted_user_id: targetId }));
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err?.message || '删除失败' }), { status: 500 });
+      }
     }
   }
 
