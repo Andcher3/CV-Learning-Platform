@@ -455,10 +455,12 @@ export default function UnitDetail() {
           {planActionError && <div className="text-sm text-rose-600 mb-3">{planActionError}</div>}
           
           {plan ? (
-            <div
-              className="prose prose-indigo max-w-none text-slate-700"
-              dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
-            />
+            <div className="overflow-x-auto pb-2">
+              <div
+                className="prose prose-indigo max-w-none text-slate-700 w-max min-w-full"
+                dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
+              />
+            </div>
           ) : (
             <div className="text-center py-8 text-slate-500">
               暂无学习计划，点击右上角按钮生成。

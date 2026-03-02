@@ -172,7 +172,7 @@ export default function Dashboard() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+        <div className="mb-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 max-w-3xl">
           <h2 className="text-xl font-semibold text-slate-900">平台改进反馈</h2>
           <p className="text-slate-600 mt-1 text-sm">欢迎提交你对平台功能和体验的改进建议，管理员会在后台查看。</p>
 
@@ -183,11 +183,11 @@ export default function Dashboard() {
             <textarea
               value={feedbackText}
               onChange={(e) => setFeedbackText(e.target.value)}
-              rows={4}
+              rows={3}
               placeholder="例如：希望增加学习进度可视化、优化移动端排版、补充更多实践案例..."
               className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            <div className="mt-3 flex justify-end">
+            <div className="mt-3">
               <button
                 type="submit"
                 disabled={feedbackLoading}
