@@ -161,7 +161,6 @@ export default async (req: Request) => {
         model,
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 600,
-        thinking: { type: 'disabled' },
       };
       const aiCall = client.chat.completions.create(requestBody);
 

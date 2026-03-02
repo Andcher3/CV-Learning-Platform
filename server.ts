@@ -559,13 +559,74 @@ async function startServer() {
   app.post('/api/plans/generate', authenticate, async (req: any, res: any) => {
     const startedAt = Date.now();
     const { unitId, prompt: clientPrompt, pretestAnswer } = req.body;
+    const wantsStream = String(req.query?.stream || '') === '1' || String(req.headers.accept || '').includes('text/event-stream');
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
-    if (!unit) return res.status(404).json({ error: 'Unit not found' });
 
     let promptBuildMs = 0;
     let aiElapsedMs = 0;
     let promptLength = 0;
     let filesCount = 0;
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    let streamClosed = false;
+
+    const sendSse = (event: string, payload: any) => {
+      if (!wantsStream || streamClosed) return;
+      try {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch (err) {
+        streamClosed = true;
+      }
+    };
+
+    const closeSse = () => {
+      if (!wantsStream || streamClosed) return;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      streamClosed = true;
+      try {
+        res.end();
+      } catch (err) {}
+    };
+
+    const respondError = (status: number, error: string) => {
+      if (wantsStream) {
+        sendSse('error', { error, status });
+        closeSse();
+        return;
+      }
+      res.status(status).json({ error });
+    };
+
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+
+      heartbeatTimer = setInterval(() => {
+        sendSse('ping', { ts: Date.now() });
+      }, 10000);
+
+      req.on('close', () => {
+        streamClosed = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+
+      sendSse('stage', { message: '请求已接收，开始处理...' });
+    }
+
+    if (!unit) {
+      return respondError(404, 'Unit not found');
+    }
 
     try {
       const { client, model } = getAiClient();
@@ -575,10 +636,10 @@ async function startServer() {
       const pretestQuestion = fs.existsSync(pretestFilePath) ? fs.readFileSync(pretestFilePath, 'utf-8').trim() : '';
 
       if (!existing && !trimmedPretestAnswer) {
-        return res.status(400).json({ error: '首次生成学习计划前，请先完成预设测评题并提交答案。' });
+        return respondError(400, '首次生成学习计划前，请先完成预设测评题并提交答案。');
       }
       if (!existing && !pretestQuestion) {
-        return res.status(400).json({ error: '首次生成学习计划前，未找到该单元的预设测评题文件。' });
+        return respondError(400, '首次生成学习计划前，未找到该单元的预设测评题文件。');
       }
 
       let basePrompt: string | undefined = clientPrompt;
@@ -598,6 +659,8 @@ async function startServer() {
       if (pretestQuestion || knowledgeAnswer) {
         basePrompt = prompts.buildPlanPrompt(basePrompt, pretestQuestion, knowledgeAnswer);
       }
+
+      sendSse('stage', { message: '正在读取资料并构建提示词...' });
       const promptBuildStartedAt = Date.now();
       const { prompt, files } = await buildPromptWithFiles(basePrompt, client);
       promptBuildMs = Date.now() - promptBuildStartedAt;
@@ -606,9 +669,8 @@ async function startServer() {
 
       const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 120000);
       const maxCompletionTokens = Number(process.env.AI_PLAN_MAX_TOKENS || 4800);
-      const aiStartedAt = Date.now();
 
-      const callAiWithTimeout = async (userPrompt: string) => {
+      const callAiWithTimeout = async (userPrompt: string, stream = false) => {
         let timeoutId: NodeJS.Timeout | null = null;
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), aiTimeoutMs);
@@ -618,8 +680,10 @@ async function startServer() {
           model,
           messages: [{ role: 'user', content: userPrompt }],
           max_tokens: maxCompletionTokens,
-          thinking: { type: 'disabled' },
         };
+        if (stream) {
+          requestBody.stream = true;
+        }
 
         try {
           return await Promise.race([
@@ -631,23 +695,58 @@ async function startServer() {
         }
       };
 
-      let response;
-      try {
-        response = await callAiWithTimeout(prompt);
-      } finally {
-        aiElapsedMs += Date.now() - aiStartedAt;
-      }
-      let ai_raw = response.choices?.[0]?.message?.content?.trim() || '';
+      sendSse('stage', { message: 'AI 正在生成学习计划...' });
+      let ai_raw = '';
+      let response: any;
 
-      if (!ai_raw) {
-        const retryPrompt = prompts.planRetry(prompt);
-        const retryAiStartedAt = Date.now();
+      if (wantsStream) {
+        const aiStartedAt = Date.now();
         try {
-          response = await callAiWithTimeout(retryPrompt);
+          const streamResponse: any = await callAiWithTimeout(prompt, true);
+          for await (const chunk of streamResponse as any) {
+            const delta = chunk?.choices?.[0]?.delta?.content;
+            if (typeof delta === 'string' && delta.length > 0) {
+              ai_raw += delta;
+              sendSse('delta', { content: delta });
+            }
+          }
         } finally {
-          aiElapsedMs += Date.now() - retryAiStartedAt;
+          aiElapsedMs += Date.now() - aiStartedAt;
         }
-        ai_raw = response.choices?.[0]?.message?.content?.trim() || '';
+
+        if (!ai_raw.trim()) {
+          sendSse('stage', { message: '首次流式结果为空，正在重试一次...' });
+          const retryPrompt = prompts.planRetry(prompt);
+          const retryAiStartedAt = Date.now();
+          try {
+            response = await callAiWithTimeout(retryPrompt);
+          } finally {
+            aiElapsedMs += Date.now() - retryAiStartedAt;
+          }
+          ai_raw = response?.choices?.[0]?.message?.content?.trim() || '';
+          if (ai_raw) {
+            sendSse('delta', { content: ai_raw });
+          }
+        }
+      } else {
+        const aiStartedAt = Date.now();
+        try {
+          response = await callAiWithTimeout(prompt);
+        } finally {
+          aiElapsedMs += Date.now() - aiStartedAt;
+        }
+        ai_raw = response?.choices?.[0]?.message?.content?.trim() || '';
+
+        if (!ai_raw) {
+          const retryPrompt = prompts.planRetry(prompt);
+          const retryAiStartedAt = Date.now();
+          try {
+            response = await callAiWithTimeout(retryPrompt);
+          } finally {
+            aiElapsedMs += Date.now() - retryAiStartedAt;
+          }
+          ai_raw = response?.choices?.[0]?.message?.content?.trim() || '';
+        }
       }
 
       if (!ai_raw) {
@@ -656,15 +755,9 @@ async function startServer() {
       }
 
       const planContent = ai_raw;
-      
       const currentGenerateCount = Number(existing?.generate_count || 0);
       if (currentGenerateCount >= MAX_PLAN_GENERATIONS) {
-        return res.status(429).json({
-          error: `学习计划最多可生成 ${MAX_PLAN_GENERATIONS} 次，当前次数已用完。`,
-          max_generate_count: MAX_PLAN_GENERATIONS,
-          generate_count: currentGenerateCount,
-          remaining_generate_count: 0
-        });
+        return respondError(429, `学习计划最多可生成 ${MAX_PLAN_GENERATIONS} 次，当前次数已用完。`);
       }
 
       if (existing) {
@@ -680,8 +773,8 @@ async function startServer() {
       const adjustCount = refreshed?.adjust_daily_date === todayKey ? Number(refreshed?.adjust_daily_count || 0) : 0;
 
       const elapsed_ms = Date.now() - startedAt;
-      console.log('[plans.generate] total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s', elapsed_ms, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id);
-      res.json({
+      console.log('[plans.generate] total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s stream=%s', elapsed_ms, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id, wantsStream ? '1' : '0');
+      const payload = {
         plan_content: planContent,
         prompt_preview: prompt,
         files_used: files,
@@ -699,14 +792,23 @@ async function startServer() {
         max_adjust_count: MAX_PLAN_ADJUSTMENTS,
         remaining_generate_count: Math.max(0, MAX_PLAN_GENERATIONS - generateCount),
         remaining_adjust_count: Math.max(0, MAX_PLAN_ADJUSTMENTS - adjustCount)
-      });
+      };
+
+      if (wantsStream) {
+        sendSse('final', payload);
+        sendSse('done', { ok: true });
+        closeSse();
+        return;
+      }
+
+      res.json(payload);
     } catch (err: any) {
       const isTimeout = err?.message === 'AI_REQUEST_TIMEOUT';
       const status = isTimeout ? 504 : 500;
       const message = isTimeout ? 'AI generation timed out. Try again with shorter input.' : err?.message || 'Unknown error';
       const elapsed_ms = Date.now() - startedAt;
       console.error('[plans.generate] error total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s message=%s', elapsed_ms, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id, message, err);
-      res.status(status).json({ error: message });
+      respondError(status, message);
     }
   });
 

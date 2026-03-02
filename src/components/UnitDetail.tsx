@@ -25,6 +25,7 @@ export default function UnitDetail() {
   const [pretestAnswer, setPretestAnswer] = useState('');
   const [loadingPretest, setLoadingPretest] = useState(false);
   const [submittingPretest, setSubmittingPretest] = useState(false);
+  const [planStreamStatus, setPlanStreamStatus] = useState('');
   const renderedPlan = useMemo(() => marked.parse(plan?.plan_content || ''), [plan?.plan_content]);
   const renderedPretestQuestion = useMemo(() => marked.parse(pretestQuestion || ''), [pretestQuestion]);
 
@@ -52,26 +53,118 @@ export default function UnitDetail() {
     setLoadingPlan(true);
     setPlanActionError('');
     setPlanActionMessage('');
+    setPlanStreamStatus('正在初始化生成任务...');
     const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/plans/generate`, {
+      const res = await fetch(`${API_BASE_URL}/api/plans/generate?stream=1`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({ unitId: id, pretestAnswer: inputPretestAnswer }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || '学习计划生成失败');
-      }
-      setPlan(data);
-      if (typeof data.remaining_generate_count === 'number') {
-        setPlanActionMessage(`学习计划已更新。剩余可重生成次数：${data.remaining_generate_count}`);
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('text/event-stream') && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalPayload: any = null;
+        let streamError = '';
+
+        const processEventBlock = (rawBlock: string) => {
+          const lines = rawBlock.split('\n').map(line => line.trim()).filter(Boolean);
+          if (lines.length === 0) return;
+
+          let eventName = 'message';
+          const dataLines: string[] = [];
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              eventName = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              dataLines.push(line.slice(5).trim());
+            }
+          }
+
+          let payload: any = {};
+          if (dataLines.length > 0) {
+            const dataText = dataLines.join('\n');
+            try {
+              payload = JSON.parse(dataText);
+            } catch (err) {
+              payload = { raw: dataText };
+            }
+          }
+
+          if (eventName === 'stage') {
+            setPlanStreamStatus(String(payload?.message || 'AI 正在处理中...'));
+            return;
+          }
+
+          if (eventName === 'delta') {
+            const deltaText = String(payload?.content || '');
+            if (!deltaText) return;
+            setPlan((prev: any) => ({ ...(prev || {}), plan_content: `${prev?.plan_content || ''}${deltaText}` }));
+            return;
+          }
+
+          if (eventName === 'final') {
+            finalPayload = payload;
+            return;
+          }
+
+          if (eventName === 'error') {
+            streamError = String(payload?.error || '学习计划生成失败');
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split('\n\n');
+          buffer = blocks.pop() || '';
+
+          for (const block of blocks) {
+            processEventBlock(block);
+          }
+        }
+
+        if (buffer.trim()) {
+          processEventBlock(buffer);
+        }
+
+        if (streamError) {
+          throw new Error(streamError);
+        }
+
+        if (!finalPayload) {
+          throw new Error('学习计划生成失败：未收到最终结果');
+        }
+
+        setPlan(finalPayload);
+        if (typeof finalPayload.remaining_generate_count === 'number') {
+          setPlanActionMessage(`学习计划已更新。剩余可重生成次数：${finalPayload.remaining_generate_count}`);
+        }
+      } else {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error || '学习计划生成失败');
+        }
+        setPlan(data);
+        if (typeof data.remaining_generate_count === 'number') {
+          setPlanActionMessage(`学习计划已更新。剩余可重生成次数：${data.remaining_generate_count}`);
+        }
       }
     } catch (err) {
       console.error(err);
       setPlanActionError(err instanceof Error ? err.message : '学习计划生成失败');
       throw err;
     } finally {
+      setPlanStreamStatus('');
       setLoadingPlan(false);
     }
   };
@@ -295,6 +388,7 @@ export default function UnitDetail() {
           <div className="text-sm text-slate-500 mb-4">
             学习计划生成次数：{generateCount}/{maxGenerateCount}（剩余 {remainingGenerateCount} 次）
           </div>
+          {loadingPlan && planStreamStatus && <div className="text-sm text-indigo-600 mb-3">{planStreamStatus}</div>}
           {planActionMessage && <div className="text-sm text-emerald-600 mb-3">{planActionMessage}</div>}
           {planActionError && <div className="text-sm text-rose-600 mb-3">{planActionError}</div>}
           
