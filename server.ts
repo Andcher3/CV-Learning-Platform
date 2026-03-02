@@ -567,25 +567,30 @@ async function startServer() {
     let promptLength = 0;
     let filesCount = 0;
     let heartbeatTimer: NodeJS.Timeout | null = null;
-    let streamClosed = false;
+    let streamEnded = false;
+    let clientDisconnected = false;
 
     const sendSse = (event: string, payload: any) => {
-      if (!wantsStream || streamClosed) return;
+      if (!wantsStream || streamEnded || clientDisconnected) return;
       try {
         res.write(`event: ${event}\n`);
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        if (typeof (res as any).flush === 'function') {
+          (res as any).flush();
+        }
       } catch (err) {
-        streamClosed = true;
+        clientDisconnected = true;
       }
     };
 
     const closeSse = () => {
-      if (!wantsStream || streamClosed) return;
+      if (!wantsStream || streamEnded) return;
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
       }
-      streamClosed = true;
+      streamEnded = true;
+      if (clientDisconnected) return;
       try {
         res.end();
       } catch (err) {}
@@ -613,8 +618,17 @@ async function startServer() {
         sendSse('ping', { ts: Date.now() });
       }, 10000);
 
-      req.on('close', () => {
-        streamClosed = true;
+      req.on('aborted', () => {
+        clientDisconnected = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+
+      res.on('close', () => {
+        clientDisconnected = true;
+        streamEnded = true;
         if (heartbeatTimer) {
           clearInterval(heartbeatTimer);
           heartbeatTimer = null;
