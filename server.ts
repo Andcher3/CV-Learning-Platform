@@ -1523,18 +1523,91 @@ async function startServer() {
   // Grade Unit
   app.post('/api/grade/:unitId', authenticate, async (req: any, res: any) => {
     const { unitId } = req.params;
+    const wantsStream = String(req.query?.stream || '') === '1' || String(req.headers.accept || '').includes('text/event-stream');
     const startedAt = Date.now();
     let promptBuildMs = 0;
     let aiElapsedMs = 0;
     let promptLength = 0;
     let filesCount = 0;
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    let streamEnded = false;
+    let clientDisconnected = false;
+
+    const sendSse = (event: string, payload: any) => {
+      if (!wantsStream || streamEnded || clientDisconnected) return;
+      try {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        if (typeof (res as any).flush === 'function') {
+          (res as any).flush();
+        }
+      } catch (err) {
+        clientDisconnected = true;
+      }
+    };
+
+    const closeSse = () => {
+      if (!wantsStream || streamEnded) return;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      streamEnded = true;
+      if (clientDisconnected) return;
+      try {
+        res.end();
+      } catch (err) {}
+    };
+
+    const respondError = (status: number, error: string) => {
+      if (wantsStream) {
+        sendSse('error', { error, status });
+        closeSse();
+        return;
+      }
+      res.status(status).json({ error });
+    };
+
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+
+      heartbeatTimer = setInterval(() => {
+        sendSse('ping', { ts: Date.now() });
+      }, 10000);
+
+      req.on('aborted', () => {
+        clientDisconnected = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+
+      res.on('close', () => {
+        clientDisconnected = true;
+        streamEnded = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+
+      sendSse('stage', { message: '评分请求已接收，正在准备材料...' });
+    }
+
     console.log('[grade] request received unitId=%s user=%s', unitId, req.user?.id);
 
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
-    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+    if (!unit) return respondError(404, 'Unit not found');
 
     const latestNote = db.prepare('SELECT * FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any;
-    if (!latestNote) return res.status(400).json({ error: 'No notes found for this unit' });
+    if (!latestNote) return respondError(400, 'No notes found for this unit');
 
     const plan = db.prepare('SELECT * FROM study_plans WHERE student_id = ? AND unit_id = ?').get(req.user.id, unitId) as any;
 
@@ -1552,27 +1625,90 @@ async function startServer() {
       promptBuildMs = Date.now() - promptBuildStartedAt;
       promptLength = prompt.length;
       filesCount = files.length;
+      sendSse('stage', { message: '评分提示词已构建，AI开始评分...' });
 
-      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 120000);
+      const gradePromptLimit = Number(process.env.AI_GRADE_PROMPT_CHAR_LIMIT || 12000);
+      const gradePrompt = prompt.length > gradePromptLimit
+        ? `${prompt.slice(0, gradePromptLimit)}\n\n[系统截断说明] 为避免超时，评分输入已按长度上限截断。`
+        : prompt;
+      const gradeMaxTokens = Number(process.env.AI_GRADE_MAX_TOKENS || 1400);
+
+      const aiTimeoutMs = Number(process.env.AI_GRADE_TIMEOUT_MS || process.env.AI_TIMEOUT_MS || 120000);
+      const aiIdleTimeoutMs = Number(process.env.AI_GRADE_IDLE_TIMEOUT_MS || 30000);
       const callAiWithTimeout = async (messages: any[]) => {
-        let timeoutId: NodeJS.Timeout | null = null;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), aiTimeoutMs);
+        const requestBody: any = {
+          model,
+          messages,
+          max_tokens: gradeMaxTokens,
+          thinking: { type: 'disabled' },
+        };
+
+        if (!wantsStream) {
+          let timeoutId: NodeJS.Timeout | null = null;
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), aiTimeoutMs);
+          });
+          try {
+            return await Promise.race([
+              client.chat.completions.create(requestBody),
+              timeoutPromise
+            ]);
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+          }
+        }
+
+        const streamRequestBody: any = { ...requestBody, stream: true };
+        const streamResponse: any = await client.chat.completions.create(streamRequestBody);
+
+        let raw = '';
+        let totalTimer: NodeJS.Timeout | null = null;
+        const totalTimeoutPromise = new Promise<never>((_, reject) => {
+          totalTimer = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), aiTimeoutMs);
         });
+        const iterator = (streamResponse as any)[Symbol.asyncIterator]();
 
         try {
-          return await Promise.race([
-            client.chat.completions.create({ model, messages }),
-            timeoutPromise
-          ]);
+          while (true) {
+            let idleTimer: NodeJS.Timeout | null = null;
+            const idleTimeoutPromise = new Promise<never>((_, reject) => {
+              idleTimer = setTimeout(() => reject(new Error('AI_IDLE_TIMEOUT')), aiIdleTimeoutMs);
+            });
+
+            let nextResult: any;
+            try {
+              nextResult = await Promise.race([
+                iterator.next(),
+                idleTimeoutPromise,
+                totalTimeoutPromise
+              ]);
+            } finally {
+              if (idleTimer) clearTimeout(idleTimer);
+            }
+
+            if (nextResult?.done) break;
+            const chunk = nextResult.value;
+            const delta = chunk?.choices?.[0]?.delta?.content;
+            if (typeof delta === 'string' && delta.length > 0) {
+              raw += delta;
+              sendSse('delta', { content: delta });
+            }
+          }
+          return {
+            choices: [{ message: { content: raw } }]
+          };
         } finally {
-          if (timeoutId) clearTimeout(timeoutId);
+          if (totalTimer) clearTimeout(totalTimer);
         }
       };
 
       const aiStartedAt = Date.now();
-      const response = await callAiWithTimeout([{ role: 'user', content: prompt }]);
-      aiElapsedMs += Date.now() - aiStartedAt;
+      let response: any;
+      try {
+        response = await callAiWithTimeout([{ role: 'user', content: gradePrompt }]);
+      } finally {
+        aiElapsedMs += Date.now() - aiStartedAt;
+      }
 
       let raw = response.choices?.[0]?.message?.content || '';
       let result: any = parseGradeResult(raw);
@@ -1580,12 +1716,16 @@ async function startServer() {
       if (!result) {
         const repairPrompt = prompts.gradeRepair();
         const retryStartedAt = Date.now();
-        const retryResponse = await callAiWithTimeout([
-          { role: 'user', content: prompt },
-          { role: 'assistant', content: raw || '（空响应）' },
-          { role: 'user', content: repairPrompt }
-        ]);
-        aiElapsedMs += Date.now() - retryStartedAt;
+        let retryResponse: any;
+        try {
+          retryResponse = await callAiWithTimeout([
+            { role: 'user', content: gradePrompt },
+            { role: 'assistant', content: raw || '（空响应）' },
+            { role: 'user', content: repairPrompt }
+          ]);
+        } finally {
+          aiElapsedMs += Date.now() - retryStartedAt;
+        }
         raw = retryResponse.choices?.[0]?.message?.content || raw;
         result = parseGradeResult(raw);
       }
@@ -1605,14 +1745,21 @@ async function startServer() {
       db.prepare('UPDATE notes SET grade = ?, feedback = ? WHERE id = ?').run(gradeText, feedbackValue, latestNote.id);
       const elapsedMs = Date.now() - startedAt;
       console.log('[grade] success total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s', elapsedMs, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id);
-      res.json({ grade: gradeText, feedback: feedbackValue, prompt_preview: prompt, files_used: files, ai_raw: raw });
+      const payload = { grade: gradeText, feedback: feedbackValue, prompt_preview: prompt, files_used: files, ai_raw: raw };
+      if (wantsStream) {
+        sendSse('final', payload);
+        sendSse('done', { ok: true });
+        closeSse();
+        return;
+      }
+      res.json(payload);
     } catch (err: any) {
-      const isTimeout = err?.message === 'AI_REQUEST_TIMEOUT';
+      const isTimeout = err?.message === 'AI_REQUEST_TIMEOUT' || err?.message === 'AI_IDLE_TIMEOUT';
       const status = isTimeout ? 504 : 500;
       const message = isTimeout ? 'AI grading timed out. Please try again.' : err?.message || '评分失败';
       const elapsedMs = Date.now() - startedAt;
       console.error('[grade] error total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s message=%s', elapsedMs, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id, message, err);
-      res.status(status).json({ error: message });
+      respondError(status, message);
     }
   });
 

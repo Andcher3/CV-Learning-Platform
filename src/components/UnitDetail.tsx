@@ -38,6 +38,7 @@ export default function UnitDetail() {
   const [grading, setGrading] = useState(false);
   const [gradeResult, setGradeResult] = useState<any>(null);
   const [gradeActionError, setGradeActionError] = useState('');
+  const [gradeStreamStatus, setGradeStreamStatus] = useState('');
   const [submittingNote, setSubmittingNote] = useState(false);
   const [planActionMessage, setPlanActionMessage] = useState('');
   const [planActionError, setPlanActionError] = useState('');
@@ -399,17 +400,49 @@ export default function UnitDetail() {
   const gradeUnit = async () => {
     setGrading(true);
     setGradeActionError('');
+    setGradeStreamStatus('评分请求已发送，正在准备中...');
     const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/grade/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/grade/${id}?stream=1`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Accept: 'text/event-stream',
+          Authorization: `Bearer ${token}`
+        },
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || '评分失败');
+
+      const contentType = res.headers.get('content-type') || '';
+      let gradeData: any = null;
+
+      if (contentType.includes('text/event-stream') && res.body) {
+        let streamError = '';
+        await consumeEventStream(res, {
+          onStage: (payload) => {
+            setGradeStreamStatus(String(payload?.message || 'AI 正在评分...'));
+          },
+          onFinal: (payload) => {
+            gradeData = payload;
+          },
+          onError: (payload) => {
+            streamError = String(payload?.error || '评分失败');
+          }
+        });
+
+        if (streamError) {
+          throw new Error(streamError);
+        }
+        if (!gradeData) {
+          throw new Error('评分失败：未收到最终结果');
+        }
+      } else {
+        gradeData = await res.json();
+        if (!res.ok) {
+          throw new Error(gradeData?.error || '评分失败');
+        }
       }
-      setGradeResult(data);
+
+      setGradeResult(gradeData);
+      setGradeStreamStatus('评分完成');
       // Refresh notes to show grade
       fetch(`${API_BASE_URL}/api/notes/${id}`, { headers: { Authorization: `Bearer ${token}` } })
         .then(res => res.json())
@@ -418,6 +451,7 @@ export default function UnitDetail() {
       console.error(err);
       setGradeActionError(err instanceof Error ? err.message : '评分失败');
     } finally {
+      setGradeStreamStatus('');
       setGrading(false);
     }
   };
@@ -710,6 +744,7 @@ export default function UnitDetail() {
               </button>
             </div>
             {gradeActionError && <div className="mt-3 text-sm text-rose-600">{gradeActionError}</div>}
+            {grading && gradeStreamStatus && <div className="mt-3 text-sm text-slate-600">{gradeStreamStatus}</div>}
           </div>
         )}
       </div>
