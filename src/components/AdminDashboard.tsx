@@ -1,6 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save, FileText, MessageSquare } from 'lucide-react';
+import { marked } from 'marked';
+
+const unwrapOuterMarkdownFence = (text: string) => {
+  const raw = String(text || '').trim();
+  const matched = raw.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i);
+  if (matched) {
+    return matched[1].trim();
+  }
+  return text || '';
+};
+
+const renderMarkdownHtml = (text: string) => marked.parse(unwrapOuterMarkdownFence(text || ''));
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'users' | 'records' | 'feedbacks' | 'settings'>('users');
@@ -362,6 +374,7 @@ function AdminRecords() {
               <table className="min-w-full divide-y divide-slate-200">
                 <thead className="bg-slate-50">
                   <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生ID</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">状态</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">滞后天数</th>
@@ -373,6 +386,7 @@ function AdminRecords() {
                 <tbody className="bg-white divide-y divide-slate-200">
                   {progressRows.map((item: any, idx: number) => (
                     <tr key={`${item.student_id}-${idx}`}>
+                      <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{item.student_id ?? '-'}</td>
                       <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{item.student_username || item.student_id}</td>
                       <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{item.status || '-'}</td>
                       <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{Number(item.lag_days || 0)}</td>
@@ -389,7 +403,7 @@ function AdminRecords() {
                   ))}
                   {progressRows.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-6 text-center text-slate-500">暂无进度检测结果</td>
+                      <td colSpan={7} className="px-4 py-6 text-center text-slate-500">暂无进度检测结果</td>
                     </tr>
                   )}
                 </tbody>
@@ -408,6 +422,7 @@ function AdminRecords() {
               <table className="min-w-full divide-y divide-slate-200">
                 <thead className="bg-slate-50">
                   <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生ID</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">单元</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">周次</th>
@@ -420,6 +435,7 @@ function AdminRecords() {
                 <tbody className="bg-white divide-y divide-slate-200">
                   {notes.map((note: any) => (
                     <tr key={note.id}>
+                      <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{note.student_id ?? '-'}</td>
                       <td className="px-4 py-3 text-sm text-slate-800">{note.student_username}</td>
                       <td className="px-4 py-3 text-sm text-slate-800">{note.unit_title}</td>
                       <td className="px-4 py-3 text-sm text-slate-600">{note.week || '-'}</td>
@@ -439,7 +455,7 @@ function AdminRecords() {
                   ))}
                   {notes.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-6 text-center text-slate-500">暂无笔记记录</td>
+                      <td colSpan={8} className="px-4 py-6 text-center text-slate-500">暂无笔记记录</td>
                     </tr>
                   )}
                 </tbody>
@@ -458,6 +474,7 @@ function AdminRecords() {
               <table className="min-w-full divide-y divide-slate-200">
                 <thead className="bg-slate-50">
                   <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生ID</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">单元</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">更新时间</th>
@@ -467,15 +484,34 @@ function AdminRecords() {
                 <tbody className="bg-white divide-y divide-slate-200">
                   {plans.map((plan: any) => (
                     <tr key={plan.id}>
+                      <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{plan.student_id ?? '-'}</td>
                       <td className="px-4 py-3 text-sm text-slate-800">{plan.student_username}</td>
                       <td className="px-4 py-3 text-sm text-slate-800">{plan.unit_title}</td>
                       <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(plan.updated_at)}</td>
-                      <td className="px-4 py-3 text-sm text-slate-700 whitespace-pre-wrap max-w-lg">{plan.plan_content}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700 max-w-lg min-w-[28rem]">
+                        <div className="max-h-56 overflow-y-auto pr-2">
+                          <div
+                            className="leading-6
+                            [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2
+                            [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-2
+                            [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1
+                            [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2
+                            [&_li]:my-1 [&_a]:text-indigo-600 [&_a]:underline
+                            [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
+                            [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-3 [&_pre]:overflow-x-auto [&_pre]:my-3
+                            [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
+                            [&_table]:w-full [&_table]:min-w-max [&_table]:border-collapse [&_table]:my-3
+                            [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left
+                            [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1"
+                            dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(plan.plan_content || '') as any }}
+                          />
+                        </div>
+                      </td>
                     </tr>
                   ))}
                   {plans.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-6 text-center text-slate-500">暂无学习计划</td>
+                      <td colSpan={5} className="px-4 py-6 text-center text-slate-500">暂无学习计划</td>
                     </tr>
                   )}
                 </tbody>
