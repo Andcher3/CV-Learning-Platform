@@ -260,40 +260,77 @@ async function startServer() {
     return { prompt, files: usedFiles };
   };
 
-  const parseGradeResult = (raw: string) => {
-    if (!raw) return null;
-    const trimmed = raw.trim();
-    const withoutFence = trimmed
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
+  const stripOuterMarkdownFence = (raw: string) => {
+    const trimmed = String(raw || '').trim();
+    return trimmed
+      .replace(/^```(?:json)?\s*/i, '')
       .replace(/\s*```$/i, '')
       .trim();
+  };
 
-    const candidates = [withoutFence];
-    const objectMatch = withoutFence.match(/\{[\s\S]*\}/);
-    if (objectMatch) candidates.push(objectMatch[0]);
+  const extractBalancedJsonObject = (text: string) => {
+    const source = String(text || '');
+    let inString = false;
+    let escaped = false;
+    let depth = 0;
+    let start = -1;
 
-    for (const candidate of candidates) {
-      try {
-        const parsed = JSON.parse(candidate);
-        if (parsed && typeof parsed === 'object') return parsed as any;
-      } catch (err) {}
+    for (let i = 0; i < source.length; i += 1) {
+      const ch = source[i];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === '{') {
+        if (depth === 0) start = i;
+        depth += 1;
+        continue;
+      }
+
+      if (ch === '}') {
+        if (depth > 0) {
+          depth -= 1;
+          if (depth === 0 && start >= 0) {
+            return source.slice(start, i + 1);
+          }
+        }
+      }
     }
+
     return null;
   };
 
   const parseAiJsonObject = (raw: string) => {
     if (!raw) return null;
-    const trimmed = raw.trim();
-    const withoutFence = trimmed
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
+    const trimmed = String(raw || '').trim().replace(/^\uFEFF/, '');
+    const withoutFence = stripOuterMarkdownFence(trimmed);
 
-    const candidates = [withoutFence];
-    const objectMatch = withoutFence.match(/\{[\s\S]*\}/);
-    if (objectMatch) candidates.push(objectMatch[0]);
+    const candidates = [withoutFence, trimmed]
+      .map(item => String(item || '').trim())
+      .filter(Boolean);
+
+    const balancedFromFence = extractBalancedJsonObject(withoutFence);
+    if (balancedFromFence) candidates.push(balancedFromFence);
+
+    const balancedFromRaw = extractBalancedJsonObject(trimmed);
+    if (balancedFromRaw) candidates.push(balancedFromRaw);
 
     for (const candidate of candidates) {
       try {
@@ -303,6 +340,8 @@ async function startServer() {
     }
     return null;
   };
+
+  const parseGradeResult = (raw: string) => parseAiJsonObject(raw);
 
   const normalizeProgressStatus = (value: string) => {
     const raw = String(value || '').trim();
@@ -1714,6 +1753,7 @@ async function startServer() {
       let result: any = parseGradeResult(raw);
 
       if (!result) {
+        sendSse('stage', { message: '首次评分输出格式异常，正在自动修复为标准 JSON...' });
         const repairPrompt = prompts.gradeRepair();
         const retryStartedAt = Date.now();
         let retryResponse: any;
@@ -1721,7 +1761,7 @@ async function startServer() {
           retryResponse = await callAiWithTimeout([
             { role: 'user', content: gradePrompt },
             { role: 'assistant', content: raw || '（空响应）' },
-            { role: 'user', content: repairPrompt }
+            { role: 'user', content: `${repairPrompt}\n\n补充要求：只输出一个 JSON 对象，禁止 markdown 代码围栏、禁止解释文字。` }
           ]);
         } finally {
           aiElapsedMs += Date.now() - retryStartedAt;
