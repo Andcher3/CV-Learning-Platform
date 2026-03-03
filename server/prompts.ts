@@ -131,6 +131,7 @@ FILES: /data/admin/plan_unit/unit${unit.id}/计算机视觉大纲_${unit.id}.md,
 字段要求：
 1) grade: 0-100 的整数
 2) feedback: 详细评价与改进建议（字符串，可包含 Markdown 表格与分段）
+3) feedback 长度建议控制在 800-1400 个中文字符内，避免冗长导致截断
 
 返回示例：{"grade":85,"feedback":"..."}`,
 

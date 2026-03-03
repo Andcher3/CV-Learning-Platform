@@ -260,77 +260,18 @@ async function startServer() {
     return { prompt, files: usedFiles };
   };
 
-  const stripOuterMarkdownFence = (raw: string) => {
-    const trimmed = String(raw || '').trim();
-    return trimmed
-      .replace(/^```(?:json)?\s*/i, '')
+  const parseGradeResult = (raw: string) => {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    const withoutFence = trimmed
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
       .replace(/\s*```$/i, '')
       .trim();
-  };
 
-  const extractBalancedJsonObject = (text: string) => {
-    const source = String(text || '');
-    let inString = false;
-    let escaped = false;
-    let depth = 0;
-    let start = -1;
-
-    for (let i = 0; i < source.length; i += 1) {
-      const ch = source[i];
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (ch === '\\') {
-          escaped = true;
-          continue;
-        }
-        if (ch === '"') {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (ch === '"') {
-        inString = true;
-        continue;
-      }
-
-      if (ch === '{') {
-        if (depth === 0) start = i;
-        depth += 1;
-        continue;
-      }
-
-      if (ch === '}') {
-        if (depth > 0) {
-          depth -= 1;
-          if (depth === 0 && start >= 0) {
-            return source.slice(start, i + 1);
-          }
-        }
-      }
-    }
-
-    return null;
-  };
-
-  const parseAiJsonObject = (raw: string) => {
-    if (!raw) return null;
-    const trimmed = String(raw || '').trim().replace(/^\uFEFF/, '');
-    const withoutFence = stripOuterMarkdownFence(trimmed);
-
-    const candidates = [withoutFence, trimmed]
-      .map(item => String(item || '').trim())
-      .filter(Boolean);
-
-    const balancedFromFence = extractBalancedJsonObject(withoutFence);
-    if (balancedFromFence) candidates.push(balancedFromFence);
-
-    const balancedFromRaw = extractBalancedJsonObject(trimmed);
-    if (balancedFromRaw) candidates.push(balancedFromRaw);
+    const candidates = [withoutFence];
+    const objectMatch = withoutFence.match(/\{[\s\S]*\}/);
+    if (objectMatch) candidates.push(objectMatch[0]);
 
     for (const candidate of candidates) {
       try {
@@ -341,7 +282,27 @@ async function startServer() {
     return null;
   };
 
-  const parseGradeResult = (raw: string) => parseAiJsonObject(raw);
+  const parseAiJsonObject = (raw: string) => {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    const withoutFence = trimmed
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    const candidates = [withoutFence];
+    const objectMatch = withoutFence.match(/\{[\s\S]*\}/);
+    if (objectMatch) candidates.push(objectMatch[0]);
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object') return parsed as any;
+      } catch (err) {}
+    }
+    return null;
+  };
 
   const normalizeProgressStatus = (value: string) => {
     const raw = String(value || '').trim();
@@ -1670,19 +1631,22 @@ async function startServer() {
       const gradePrompt = prompt.length > gradePromptLimit
         ? `${prompt.slice(0, gradePromptLimit)}\n\n[系统截断说明] 为避免超时，评分输入已按长度上限截断。`
         : prompt;
-      const gradeMaxTokens = Number(process.env.AI_GRADE_MAX_TOKENS || 1400);
+      const gradeMaxTokens = Number(process.env.AI_GRADE_MAX_TOKENS || 1800);
+      const gradeRetryMaxTokens = Number(process.env.AI_GRADE_RETRY_MAX_TOKENS || 2600);
 
       const aiTimeoutMs = Number(process.env.AI_GRADE_TIMEOUT_MS || process.env.AI_TIMEOUT_MS || 120000);
       const aiIdleTimeoutMs = Number(process.env.AI_GRADE_IDLE_TIMEOUT_MS || 30000);
-      const callAiWithTimeout = async (messages: any[]) => {
+      const callAiWithTimeout = async (messages: any[], options?: { stream?: boolean; maxTokens?: number }) => {
+        const shouldStream = options?.stream ?? wantsStream;
+        const effectiveMaxTokens = Number(options?.maxTokens || gradeMaxTokens);
         const requestBody: any = {
           model,
           messages,
-          max_tokens: gradeMaxTokens,
+          max_tokens: effectiveMaxTokens,
           thinking: { type: 'disabled' },
         };
 
-        if (!wantsStream) {
+        if (!shouldStream) {
           let timeoutId: NodeJS.Timeout | null = null;
           const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), aiTimeoutMs);
@@ -1701,6 +1665,7 @@ async function startServer() {
         const streamResponse: any = await client.chat.completions.create(streamRequestBody);
 
         let raw = '';
+        let lastFinishReason: string | null = null;
         let totalTimer: NodeJS.Timeout | null = null;
         const totalTimeoutPromise = new Promise<never>((_, reject) => {
           totalTimer = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), aiTimeoutMs);
@@ -1728,13 +1693,17 @@ async function startServer() {
             if (nextResult?.done) break;
             const chunk = nextResult.value;
             const delta = chunk?.choices?.[0]?.delta?.content;
+            const finishReason = chunk?.choices?.[0]?.finish_reason;
+            if (typeof finishReason === 'string' && finishReason) {
+              lastFinishReason = finishReason;
+            }
             if (typeof delta === 'string' && delta.length > 0) {
               raw += delta;
               sendSse('delta', { content: delta });
             }
           }
           return {
-            choices: [{ message: { content: raw } }]
+            choices: [{ message: { content: raw }, finish_reason: lastFinishReason }]
           };
         } finally {
           if (totalTimer) clearTimeout(totalTimer);
@@ -1750,19 +1719,21 @@ async function startServer() {
       }
 
       let raw = response.choices?.[0]?.message?.content || '';
+      const firstFinishReason = String(response?.choices?.[0]?.finish_reason || '');
       let result: any = parseGradeResult(raw);
 
       if (!result) {
-        sendSse('stage', { message: '首次评分输出格式异常，正在自动修复为标准 JSON...' });
+        sendSse('stage', { message: firstFinishReason === 'length' ? '评分内容过长，正在自动补全并重试...' : '评分结果格式异常，正在自动修复...' });
         const repairPrompt = prompts.gradeRepair();
         const retryStartedAt = Date.now();
         let retryResponse: any;
+        const repairAssistantRaw = String(raw || '（空响应）').slice(0, 6000);
         try {
           retryResponse = await callAiWithTimeout([
             { role: 'user', content: gradePrompt },
-            { role: 'assistant', content: raw || '（空响应）' },
-            { role: 'user', content: `${repairPrompt}\n\n补充要求：只输出一个 JSON 对象，禁止 markdown 代码围栏、禁止解释文字。` }
-          ]);
+            { role: 'assistant', content: repairAssistantRaw },
+            { role: 'user', content: repairPrompt }
+          ], { stream: false, maxTokens: gradeRetryMaxTokens });
         } finally {
           aiElapsedMs += Date.now() - retryStartedAt;
         }
