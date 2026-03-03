@@ -49,6 +49,12 @@ export default function UnitDetail() {
   const [submittingPretest, setSubmittingPretest] = useState(false);
   const [planStreamStatus, setPlanStreamStatus] = useState('');
   const [noteStreamStatus, setNoteStreamStatus] = useState('');
+  const [quizAssignment, setQuizAssignment] = useState<any>(null);
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [quizError, setQuizError] = useState('');
+  const [quizMessage, setQuizMessage] = useState('');
+  const [quizSubmitting, setQuizSubmitting] = useState(false);
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
   const [planHistory, setPlanHistory] = useState<any[]>([]);
   const [planViewIndex, setPlanViewIndex] = useState(0);
   const planVersions = useMemo(() => {
@@ -179,7 +185,69 @@ export default function UnitDetail() {
     fetch(`${API_BASE_URL}/api/notes/${id}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => res.json())
       .then(data => setNotes(data));
+
+    setQuizLoading(true);
+    fetch(`${API_BASE_URL}/api/quiz/unit/${id}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => res.json())
+      .then(data => {
+        setQuizAssignment(data);
+        setQuizAnswers(data?.student_answers && typeof data.student_answers === 'object' ? data.student_answers : {});
+      })
+      .catch(() => setQuizError('测试数据加载失败'))
+      .finally(() => setQuizLoading(false));
   }, [id, navigate]);
+
+  const loadQuizAssignment = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    setQuizLoading(true);
+    setQuizError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/quiz/unit/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      setQuizAssignment(data);
+      setQuizAnswers(data?.student_answers && typeof data.student_answers === 'object' ? data.student_answers : {});
+    } catch (err: any) {
+      setQuizError(err?.message || '测试数据加载失败');
+    } finally {
+      setQuizLoading(false);
+    }
+  };
+
+  const submitQuiz = async () => {
+    if (!quizAssignment?.id) return;
+    const questions = Array.isArray(quizAssignment?.questions) ? quizAssignment.questions : [];
+    const unanswered = questions.filter((item: any) => !String(quizAnswers[item.id] || '').trim());
+    if (unanswered.length > 0) {
+      setQuizError(`还有 ${unanswered.length} 题未作答`);
+      return;
+    }
+
+    setQuizSubmitting(true);
+    setQuizError('');
+    setQuizMessage('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/api/quiz/${quizAssignment.id}/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ answers: quizAnswers })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '提交失败');
+      }
+      setQuizMessage(`提交成功，得分 ${data?.score ?? 0} 分（${data?.correct_count ?? 0}/${data?.total_questions ?? 0}）`);
+      await loadQuizAssignment();
+    } catch (err: any) {
+      setQuizError(err?.message || '提交失败');
+    } finally {
+      setQuizSubmitting(false);
+    }
+  };
 
   const generatePlan = async (inputPretestAnswer = '') => {
     setLoadingPlan(true);
@@ -486,6 +554,9 @@ export default function UnitDetail() {
 
   const displayedPlanLabel = displayedPlan?.source === 'current' ? '当前计划' : `历史计划#${planViewIndex}`;
   const contextContentWithDisplayedPlan = `${contextContent}\n页面当前展示的计划版本：${displayedPlanLabel}\n页面当前展示的计划内容：${displayedPlanContent || '无'}\n`;
+  const quizQuestions = Array.isArray(quizAssignment?.questions) ? quizAssignment.questions : [];
+  const quizStatus = String(quizAssignment?.status || 'none');
+  const quizDeadlineText = quizAssignment?.expires_at ? new Date(quizAssignment.expires_at).toLocaleString() : '-';
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -612,6 +683,86 @@ export default function UnitDetail() {
           ) : (
             <div className="text-center py-8 text-slate-500">
               暂无学习计划，点击右上角按钮生成。
+            </div>
+          )}
+        </div>
+
+        {/* Quiz Section */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold text-slate-900 flex items-center">
+              <CheckCircle className="w-6 h-6 mr-2 text-indigo-600" /> 单元测试
+            </h2>
+            <button onClick={loadQuizAssignment} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 transition">刷新</button>
+          </div>
+
+          {quizLoading ? (
+            <div className="text-slate-500">测试加载中...</div>
+          ) : !quizAssignment ? (
+            <div className="text-slate-500">管理员暂未向你发放该单元测试。</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="text-sm text-slate-600">
+                截止时间：{quizDeadlineText}
+                <span className="ml-3">
+                  状态：
+                  {quizStatus === 'submitted' ? '已提交' : quizStatus === 'expired' ? '已过期' : '待作答'}
+                </span>
+              </div>
+
+              {quizMessage && <div className="text-sm text-emerald-700">{quizMessage}</div>}
+              {quizError && <div className="text-sm text-rose-600">{quizError}</div>}
+
+              {quizStatus === 'pending' ? (
+                <>
+                  <div className="space-y-5">
+                    {quizQuestions.map((question: any, index: number) => (
+                      <div key={question.id} className="border border-slate-200 rounded-xl p-4">
+                        <div className="text-sm text-slate-500 mb-1">第 {index + 1} 题 · {question.difficulty}</div>
+                        <div className="text-slate-900 whitespace-pre-wrap mb-3">{question.prompt}</div>
+                        <div className="space-y-2">
+                          {Object.entries(question.options || {}).map(([key, value]) => (
+                            <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="radio"
+                                name={`quiz-${question.id}`}
+                                value={key}
+                                checked={String(quizAnswers[question.id] || '') === key}
+                                onChange={(e) => setQuizAnswers((prev) => ({ ...prev, [question.id]: e.target.value }))}
+                              />
+                              <span>{key}. {String(value)}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={submitQuiz}
+                    disabled={quizSubmitting || quizQuestions.length === 0}
+                    className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 transition disabled:opacity-50"
+                  >
+                    {quizSubmitting ? '提交中...' : '提交测试答案'}
+                  </button>
+                </>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-sm text-slate-700">
+                    成绩：{quizAssignment.score ?? '-'} 分，正确 {quizAssignment.correct_count ?? 0}/{quizAssignment.total_questions ?? quizQuestions.length}
+                  </div>
+                  <div className="space-y-3">
+                    {(Array.isArray(quizAssignment.grading_detail) ? quizAssignment.grading_detail : []).map((item: any, idx: number) => (
+                      <div key={`${item.id}-${idx}`} className="border border-slate-200 rounded-lg p-3">
+                        <div className="text-sm text-slate-900">第 {idx + 1} 题：{item.prompt}</div>
+                        <div className="text-sm text-slate-600 mt-1">你的答案：{item.user_answer || '-'}，正确答案：{item.correct_answer || '-'}</div>
+                        <div className={`text-sm mt-1 ${item.is_correct ? 'text-emerald-600' : 'text-rose-600'}`}>{item.is_correct ? '回答正确' : '回答错误'}</div>
+                        {item.explanation && <div className="text-sm text-slate-500 mt-1">解析：{item.explanation}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

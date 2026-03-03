@@ -2,6 +2,7 @@ import { Config } from "@netlify/functions";
 import db from './db';
 import bcrypt from 'bcryptjs';
 import { authenticate, getAiClient } from './utils';
+import { buildRandomQuizForUnit } from './quiz-utils';
 
 export default async (req: Request) => {
   const url = new URL(req.url);
@@ -136,6 +137,7 @@ export default async (req: Request) => {
           db.prepare('DELETE FROM feedbacks WHERE student_id = ?').run(studentId);
           db.prepare('DELETE FROM notes WHERE student_id = ?').run(studentId);
           db.prepare('DELETE FROM study_plans WHERE student_id = ?').run(studentId);
+          db.prepare('DELETE FROM quiz_assignments WHERE student_id = ?').run(studentId);
           return db.prepare('DELETE FROM users WHERE id = ?').run(studentId);
         });
         const result = removeUser(targetId);
@@ -223,6 +225,123 @@ export default async (req: Request) => {
       ORDER BY f.created_at DESC
     `).all();
     return new Response(JSON.stringify(feedbacks));
+  }
+
+  if (url.pathname === '/api/admin/quizzes' && req.method === 'GET') {
+    const rows = db.prepare(`
+      SELECT q.*, u.username AS student_username, un.title AS unit_title, a.username AS assigned_by_username
+      FROM quiz_assignments q
+      JOIN users u ON q.student_id = u.id
+      JOIN units un ON q.unit_id = un.id
+      LEFT JOIN users a ON q.assigned_by = a.id
+      ORDER BY q.created_at DESC, q.id DESC
+    `).all() as any[];
+
+    const now = Date.now();
+    const data = rows.map((row) => {
+      const submitted = !!row.submitted_at;
+      const expired = !submitted && row.expires_at ? new Date(row.expires_at).getTime() < now : false;
+      const status = submitted ? 'submitted' : expired ? 'expired' : 'pending';
+      return {
+        ...row,
+        status,
+      };
+    });
+
+    return new Response(JSON.stringify(data));
+  }
+
+  if (url.pathname === '/api/admin/quizzes/assign' && req.method === 'POST') {
+    try {
+      const body = await req.json();
+      const unitId = Number(body?.unitId);
+      const targetType = String(body?.targetType || 'all');
+      const studentId = Number(body?.studentId);
+
+      if (!Number.isFinite(unitId) || unitId <= 0) {
+        return new Response(JSON.stringify({ error: '无效的单元ID' }), { status: 400 });
+      }
+
+      const unit = db.prepare('SELECT id, title FROM units WHERE id = ?').get(unitId) as any;
+      if (!unit) {
+        return new Response(JSON.stringify({ error: '单元不存在' }), { status: 404 });
+      }
+
+      let students: any[] = [];
+      if (targetType === 'single') {
+        if (!Number.isFinite(studentId) || studentId <= 0) {
+          return new Response(JSON.stringify({ error: '无效的学生ID' }), { status: 400 });
+        }
+        const target = db.prepare('SELECT id, username FROM users WHERE id = ? AND role = ?').get(studentId, 'student') as any;
+        if (!target) {
+          return new Response(JSON.stringify({ error: '目标学生不存在' }), { status: 404 });
+        }
+        students = [target];
+      } else {
+        students = db.prepare('SELECT id, username FROM users WHERE role = ? ORDER BY id ASC').all('student') as any[];
+      }
+
+      if (!students.length) {
+        return new Response(JSON.stringify({ error: '没有可发送的学生账号' }), { status: 400 });
+      }
+
+      const { questions, quizDir, totalQuestions } = buildRandomQuizForUnit(unitId);
+      const sanitizedQuestions = questions.map((question) => ({
+        id: question.id,
+        difficulty: question.difficulty,
+        sourceNumber: question.sourceNumber,
+        prompt: question.prompt,
+        options: question.options,
+      }));
+      const answerKey = questions.map((question) => ({
+        id: question.id,
+        correctAnswer: question.correctAnswer,
+        explanation: question.explanation,
+      }));
+
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+      const createdRows: any[] = [];
+      const insert = db.prepare(`
+        INSERT INTO quiz_assignments (unit_id, student_id, assigned_by, quiz_payload, answer_key, total_questions, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const assignTx = db.transaction((targets: any[]) => {
+        for (const student of targets) {
+          const result = insert.run(
+            unitId,
+            student.id,
+            user.id,
+            JSON.stringify(sanitizedQuestions),
+            JSON.stringify(answerKey),
+            totalQuestions,
+            expiresAt
+          );
+          createdRows.push({
+            assignment_id: result.lastInsertRowid,
+            student_id: student.id,
+            student_username: student.username,
+            expires_at: expiresAt,
+          });
+        }
+      });
+
+      assignTx(students);
+
+      return new Response(JSON.stringify({
+        success: true,
+        unit_id: unitId,
+        unit_title: unit.title,
+        target_type: targetType,
+        quiz_dir: quizDir,
+        total_questions: totalQuestions,
+        assigned_count: createdRows.length,
+        assignments: createdRows,
+      }));
+    } catch (err: any) {
+      return new Response(JSON.stringify({ error: err?.message || '发送测试题失败' }), { status: 500 });
+    }
   }
 
   return new Response('Not found', { status: 404 });

@@ -24,7 +24,7 @@ const renderMarkdownHtml = (text: string) => {
 };
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'users' | 'records' | 'feedbacks' | 'settings'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'records' | 'feedbacks' | 'settings' | 'quizzes'>('users');
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
@@ -66,6 +66,12 @@ export default function AdminDashboard() {
           >
             <MessageSquare className="w-5 h-5 mr-3" /> 学生反馈
           </button>
+          <button
+            onClick={() => setActiveTab('quizzes')}
+            className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg ${activeTab === 'quizzes' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-100'}`}
+          >
+            <FileText className="w-5 h-5 mr-3" /> 测试发放
+          </button>
         </nav>
         <button
           onClick={() => navigate('/dashboard')}
@@ -77,7 +83,7 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <div className="flex-1 p-8 overflow-y-auto">
-        {activeTab === 'users' ? <UsersManagement /> : activeTab === 'records' ? <AdminRecords /> : activeTab === 'feedbacks' ? <AdminFeedbacks /> : <AISettings />}
+        {activeTab === 'users' ? <UsersManagement /> : activeTab === 'records' ? <AdminRecords /> : activeTab === 'feedbacks' ? <AdminFeedbacks /> : activeTab === 'quizzes' ? <AdminQuizzes /> : <AISettings />}
       </div>
     </div>
   );
@@ -721,6 +727,210 @@ function AdminFeedbacks() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function AdminQuizzes() {
+  const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+  const [units, setUnits] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+  const [records, setRecords] = useState<any[]>([]);
+  const [unitId, setUnitId] = useState('');
+  const [targetType, setTargetType] = useState<'all' | 'single'>('all');
+  const [studentId, setStudentId] = useState('');
+  const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const token = localStorage.getItem('token') || '';
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const [unitsRes, usersRes, recordsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/units`, { headers }),
+        fetch(`${API_BASE_URL}/api/admin/users`, { headers }),
+        fetch(`${API_BASE_URL}/api/admin/quizzes`, { headers })
+      ]);
+
+      const unitsData = await unitsRes.json();
+      const usersData = await usersRes.json();
+      const recordsData = await recordsRes.json();
+
+      setUnits(Array.isArray(unitsData) ? unitsData : []);
+      setStudents(Array.isArray(usersData) ? usersData.filter((u: any) => u.role === 'student') : []);
+      setRecords(Array.isArray(recordsData) ? recordsData : []);
+      if (!unitId && Array.isArray(unitsData) && unitsData.length > 0) {
+        setUnitId(String(unitsData[0].id));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData().catch(console.error);
+  }, []);
+
+  const formatDate = (value?: string) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  };
+
+  const handleAssign = async () => {
+    setMessage('');
+    setError('');
+
+    if (!unitId) {
+      setError('请选择单元');
+      return;
+    }
+    if (targetType === 'single' && !studentId) {
+      setError('请选择学生');
+      return;
+    }
+
+    setSending(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/quizzes/assign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          unitId: Number(unitId),
+          targetType,
+          studentId: targetType === 'single' ? Number(studentId) : undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '发送失败');
+      }
+
+      setMessage(`发送成功：已向 ${data?.assigned_count || 0} 名学生发出测试，作答时限24小时。`);
+      await loadData();
+    } catch (err: any) {
+      setError(err?.message || '发送失败');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">测试发放</h2>
+          <p className="text-slate-500 mt-1">为全体或单个学生发送单元测试（简单4题/中等3题/困难3题，24小时内提交）。</p>
+        </div>
+        <button onClick={() => loadData()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">刷新</button>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">单元</label>
+            <select value={unitId} onChange={(e) => setUnitId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="">请选择单元</option>
+              {units.map((unit: any) => (
+                <option key={unit.id} value={unit.id}>{unit.title}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">发送对象</label>
+            <select value={targetType} onChange={(e) => setTargetType(e.target.value as 'all' | 'single')} className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="all">全体学生</option>
+              <option value="single">单个学生</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">学生</label>
+            <select
+              value={studentId}
+              onChange={(e) => setStudentId(e.target.value)}
+              disabled={targetType !== 'single'}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100"
+            >
+              <option value="">请选择学生</option>
+              {students.map((student: any) => (
+                <option key={student.id} value={student.id}>{student.username}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleAssign}
+            disabled={sending || !unitId || (targetType === 'single' && !studentId)}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50"
+          >
+            {sending ? '发送中...' : '发送测试'}
+          </button>
+          {message && <span className="text-sm text-emerald-700">{message}</span>}
+          {error && <span className="text-sm text-rose-600">{error}</span>}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200">
+          <h3 className="text-lg font-semibold text-slate-900">测试记录与成绩</h3>
+        </div>
+        {loading ? (
+          <div className="p-6 text-slate-500">加载中...</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">ID</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">单元</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">状态</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">分数</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">正确题数</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">发放时间</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">截止时间</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-slate-200">
+                {records.map((item: any) => (
+                  <tr key={item.id}>
+                    <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{item.id}</td>
+                    <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{item.unit_title}</td>
+                    <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{item.student_username}</td>
+                    <td className="px-4 py-3 text-sm whitespace-nowrap">
+                      {item.status === 'submitted' ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">已提交</span>
+                      ) : item.status === 'expired' ? (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-xs font-semibold">已过期</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">待作答</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{item.score ?? '-'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{typeof item.correct_count === 'number' ? `${item.correct_count}/${item.total_questions}` : '-'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.created_at)}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.expires_at)}</td>
+                  </tr>
+                ))}
+                {records.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-6 text-center text-slate-500">暂无测试记录</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
