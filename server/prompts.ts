@@ -1,10 +1,6 @@
 export const prompts = {
-  buildPlanPrompt: (
-    basePrompt: string,
-    pretestQuestion: string,
-    pretestAnswer: string,
-    budgetJson?: string
-  ) => `${basePrompt}
+  buildPlanPrompt: (basePrompt: string, pretestQuestion: string, pretestAnswer: string) => `${basePrompt}
+
 
 [学生基础水平测评题目]
 ${pretestQuestion || '（未读取到题目）'}
@@ -29,13 +25,9 @@ ${pretestAnswer || '（未提供答案）'}
      - 若评级为 A（合格）：融合当前大纲与旧计划的合理节奏，输出兼顾理论与实操的标准看板。
      - 若评级为 C（崩盘）：拉满该单元的弹性工时上限；在前期插入“前置基础修补”任务，并将大任务拆成更细的步骤。
    - 禁止输出 Stage 0/1/2… 分阶段大纲式模板；禁止出现“审计结论与工时调整说明”这种引言段落；只输出任务表与工时汇总。
-3) 工时约束（从读取到的 md ，找到类似找到“总计工时：约X小时”的段落，从中提取总计工时的具体时间(比如总计工时：约1小时，那么总计工时记为1h)）：
-   - 从预算协议读取 total_hours_target（也就是总计工时）。
-   - 允许略超：total_hours 必须 <= soft_max_hours（= total_hours_target + tolerance_hours）。
-   - 仅当评级为 C 时允许出现“弹性工时”，但 total_hours 仍必须 <= absolute_max_hours（默认 2× total_hours_target）。
-   - 你必须为每个任务标注估算小时(h)，并在末尾输出 total_hours 与复算结论（是否满足 soft_max_hours / absolute_max_hours）。
-4) 输出时仅输出学习计划正文（Markdown），除此之外不要输出任何审计评级、诊断或解释性文字。
-5）自行检查是否满足上述的要求，如果不满足，请自我批评并重新输出。`,
+3）对照当前主计划大纲中的本单元任务里的工时安排，不要超过该单元的工时上限；如果需要增加工时，必须在看板中明确标注“弹性工时”部分，并说明增加的理由。
+输出时仅输出《本单元执行看板》的内容，不要输出任何其他文字或解释。
+4）自行检查是否满足上述的要求，如果不满足，请自我批评并重新输出。`,
 
   planRetry: (currentPrompt: string) => `${currentPrompt}
 
