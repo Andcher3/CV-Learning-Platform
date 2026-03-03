@@ -109,6 +109,26 @@ db.exec(`
     FOREIGN KEY(student_id) REFERENCES users(id),
     FOREIGN KEY(unit_id) REFERENCES units(id)
   );
+
+  CREATE TABLE IF NOT EXISTS quiz_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    unit_id INTEGER NOT NULL,
+    student_id INTEGER NOT NULL,
+    assigned_by INTEGER NOT NULL,
+    quiz_payload TEXT NOT NULL,
+    answer_key TEXT NOT NULL,
+    student_answers TEXT,
+    grading_detail TEXT,
+    total_questions INTEGER NOT NULL DEFAULT 0,
+    correct_count INTEGER,
+    score INTEGER,
+    submitted_at DATETIME,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(unit_id) REFERENCES units(id),
+    FOREIGN KEY(student_id) REFERENCES users(id),
+    FOREIGN KEY(assigned_by) REFERENCES users(id)
+  );
 `);
 
 // Add columns if they don't exist (for existing db)
@@ -149,6 +169,46 @@ try {
 }
 try {
   db.exec("ALTER TABLE study_plans ADD COLUMN pretest_submitted_at DATETIME");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE quiz_assignments ADD COLUMN student_answers TEXT");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE quiz_assignments ADD COLUMN grading_detail TEXT");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE quiz_assignments ADD COLUMN total_questions INTEGER NOT NULL DEFAULT 0");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE quiz_assignments ADD COLUMN correct_count INTEGER");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE quiz_assignments ADD COLUMN score INTEGER");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE quiz_assignments ADD COLUMN submitted_at DATETIME");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE quiz_assignments ADD COLUMN expires_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE quiz_assignments ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
 } catch (e) {
   // Column might already exist
 }

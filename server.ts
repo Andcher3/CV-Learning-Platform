@@ -9,6 +9,7 @@ import path from 'path';
 import multer from 'multer';
 import fs from 'fs';
 import { prompts } from './server/prompts';
+import { buildRandomQuizForUnit } from './server/quiz-utils';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 const DATA_DIR = process.env.DATA_DIR || '/data';
@@ -574,6 +575,7 @@ async function startServer() {
         db.prepare('DELETE FROM feedbacks WHERE student_id = ?').run(studentId);
         db.prepare('DELETE FROM notes WHERE student_id = ?').run(studentId);
         db.prepare('DELETE FROM study_plans WHERE student_id = ?').run(studentId);
+        db.prepare('DELETE FROM quiz_assignments WHERE student_id = ?').run(studentId);
         return db.prepare('DELETE FROM users WHERE id = ?').run(studentId);
       });
 
@@ -663,6 +665,260 @@ async function startServer() {
       ORDER BY f.created_at DESC
     `).all();
     res.json(feedbacks);
+  });
+
+  app.get('/api/admin/quizzes', authenticate, requireAdmin, (req: any, res: any) => {
+    const rows = db.prepare(`
+      SELECT q.*, u.username AS student_username, un.title AS unit_title, a.username AS assigned_by_username
+      FROM quiz_assignments q
+      JOIN users u ON q.student_id = u.id
+      JOIN units un ON q.unit_id = un.id
+      LEFT JOIN users a ON q.assigned_by = a.id
+      ORDER BY q.created_at DESC, q.id DESC
+    `).all() as any[];
+
+    const now = Date.now();
+    const data = rows.map((row) => {
+      const submitted = !!row.submitted_at;
+      const expired = !submitted && row.expires_at ? new Date(row.expires_at).getTime() < now : false;
+      const status = submitted ? 'submitted' : expired ? 'expired' : 'pending';
+      return { ...row, status };
+    });
+
+    res.json(data);
+  });
+
+  app.post('/api/admin/quizzes/assign', authenticate, requireAdmin, (req: any, res: any) => {
+    try {
+      const unitId = Number(req.body?.unitId);
+      const targetType = String(req.body?.targetType || 'all');
+      const studentId = Number(req.body?.studentId);
+
+      if (!Number.isFinite(unitId) || unitId <= 0) {
+        return res.status(400).json({ error: '无效的单元ID' });
+      }
+
+      const unit = db.prepare('SELECT id, title FROM units WHERE id = ?').get(unitId) as any;
+      if (!unit) {
+        return res.status(404).json({ error: '单元不存在' });
+      }
+
+      let students: any[] = [];
+      if (targetType === 'single') {
+        if (!Number.isFinite(studentId) || studentId <= 0) {
+          return res.status(400).json({ error: '无效的学生ID' });
+        }
+        const target = db.prepare('SELECT id, username FROM users WHERE id = ? AND role = ?').get(studentId, 'student') as any;
+        if (!target) {
+          return res.status(404).json({ error: '目标学生不存在' });
+        }
+        students = [target];
+      } else {
+        students = db.prepare('SELECT id, username FROM users WHERE role = ? ORDER BY id ASC').all('student') as any[];
+      }
+
+      if (!students.length) {
+        return res.status(400).json({ error: '没有可发送的学生账号' });
+      }
+
+      const { questions, quizDir, totalQuestions } = buildRandomQuizForUnit(unitId);
+      const sanitizedQuestions = questions.map((question: any) => ({
+        id: question.id,
+        difficulty: question.difficulty,
+        sourceNumber: question.sourceNumber,
+        prompt: question.prompt,
+        options: question.options,
+      }));
+      const answerKey = questions.map((question: any) => ({
+        id: question.id,
+        correctAnswer: question.correctAnswer,
+        explanation: question.explanation,
+      }));
+
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const createdRows: any[] = [];
+      const insert = db.prepare(`
+        INSERT INTO quiz_assignments (unit_id, student_id, assigned_by, quiz_payload, answer_key, total_questions, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const assignTx = db.transaction((targets: any[]) => {
+        for (const student of targets) {
+          const result = insert.run(
+            unitId,
+            student.id,
+            req.user.id,
+            JSON.stringify(sanitizedQuestions),
+            JSON.stringify(answerKey),
+            totalQuestions,
+            expiresAt
+          );
+          createdRows.push({
+            assignment_id: result.lastInsertRowid,
+            student_id: student.id,
+            student_username: student.username,
+            expires_at: expiresAt,
+          });
+        }
+      });
+
+      assignTx(students);
+
+      res.json({
+        success: true,
+        unit_id: unitId,
+        unit_title: unit.title,
+        target_type: targetType,
+        quiz_dir: quizDir,
+        total_questions: totalQuestions,
+        assigned_count: createdRows.length,
+        assignments: createdRows,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || '发送测试题失败' });
+    }
+  });
+
+  app.get('/api/quiz/unit/:id', authenticate, (req: any, res: any) => {
+    const unitId = Number(req.params.id);
+    if (!Number.isFinite(unitId) || unitId <= 0) {
+      return res.status(400).json({ error: '无效的单元ID' });
+    }
+
+    const assignment = db.prepare(`
+      SELECT q.*, un.title AS unit_title
+      FROM quiz_assignments q
+      JOIN units un ON q.unit_id = un.id
+      WHERE q.student_id = ? AND q.unit_id = ?
+      ORDER BY q.created_at DESC, q.id DESC
+      LIMIT 1
+    `).get(req.user.id, unitId) as any;
+
+    if (!assignment) {
+      return res.json(null);
+    }
+
+    const parseJson = (raw: string | null, fallback: any) => {
+      if (!raw) return fallback;
+      try {
+        return JSON.parse(raw);
+      } catch (err) {
+        return fallback;
+      }
+    };
+
+    const submitted = !!assignment.submitted_at;
+    const expired = !submitted && assignment.expires_at ? new Date(assignment.expires_at).getTime() < Date.now() : false;
+    const status = submitted ? 'submitted' : expired ? 'expired' : 'pending';
+
+    res.json({
+      id: assignment.id,
+      unit_id: assignment.unit_id,
+      unit_title: assignment.unit_title,
+      created_at: assignment.created_at,
+      expires_at: assignment.expires_at,
+      submitted_at: assignment.submitted_at,
+      total_questions: Number(assignment.total_questions || 0),
+      correct_count: assignment.correct_count,
+      score: assignment.score,
+      status,
+      questions: parseJson(assignment.quiz_payload, []),
+      student_answers: parseJson(assignment.student_answers, {}),
+      grading_detail: parseJson(assignment.grading_detail, []),
+    });
+  });
+
+  app.post('/api/quiz/:id/submit', authenticate, (req: any, res: any) => {
+    const assignmentId = Number(req.params.id);
+    if (!Number.isFinite(assignmentId) || assignmentId <= 0) {
+      return res.status(400).json({ error: '无效的测试ID' });
+    }
+
+    const assignment = db.prepare('SELECT * FROM quiz_assignments WHERE id = ? AND student_id = ?').get(assignmentId, req.user.id) as any;
+    if (!assignment) {
+      return res.status(404).json({ error: '测试不存在' });
+    }
+    if (assignment.submitted_at) {
+      return res.status(400).json({ error: '该测试已提交，不能重复提交' });
+    }
+
+    const expired = assignment.expires_at ? new Date(assignment.expires_at).getTime() < Date.now() : false;
+    if (expired) {
+      return res.status(400).json({ error: '测试已超过24小时作答时限' });
+    }
+
+    const submittedAnswers = req.body?.answers && typeof req.body.answers === 'object' ? req.body.answers : {};
+    const parseJson = (raw: string | null, fallback: any) => {
+      if (!raw) return fallback;
+      try {
+        return JSON.parse(raw);
+      } catch (err) {
+        return fallback;
+      }
+    };
+
+    const questions = parseJson(assignment.quiz_payload, [] as any[]);
+    const answerRows = parseJson(assignment.answer_key, [] as any[]);
+    const answerMap = new Map<string, { correctAnswer: string; explanation: string }>();
+    for (const item of answerRows) {
+      const key = String(item?.id || '').trim();
+      if (!key) continue;
+      answerMap.set(key, {
+        correctAnswer: String(item?.correctAnswer || '').trim().toUpperCase(),
+        explanation: String(item?.explanation || '').trim(),
+      });
+    }
+
+    const unanswered = questions.filter((question: any) => !String(submittedAnswers[String(question?.id || '')] || '').trim());
+    if (unanswered.length > 0) {
+      return res.status(400).json({ error: `存在未作答题目，共 ${unanswered.length} 题` });
+    }
+
+    let correctCount = 0;
+    const gradingDetail = questions.map((question: any) => {
+      const id = String(question?.id || '');
+      const userAnswer = String(submittedAnswers[id] || '').trim().toUpperCase();
+      const answer = answerMap.get(id);
+      const correctAnswer = String(answer?.correctAnswer || '').trim().toUpperCase();
+      const isCorrect = !!correctAnswer && userAnswer === correctAnswer;
+      if (isCorrect) correctCount += 1;
+      return {
+        id,
+        difficulty: question?.difficulty,
+        sourceNumber: question?.sourceNumber,
+        prompt: question?.prompt,
+        user_answer: userAnswer,
+        correct_answer: correctAnswer,
+        is_correct: isCorrect,
+        explanation: answer?.explanation || '',
+      };
+    });
+
+    const totalQuestions = Number(assignment.total_questions || questions.length || 0);
+    const safeTotal = totalQuestions > 0 ? totalQuestions : gradingDetail.length;
+    const score = safeTotal > 0 ? Math.round((correctCount / safeTotal) * 100) : 0;
+
+    db.prepare(`
+      UPDATE quiz_assignments
+      SET student_answers = ?, grading_detail = ?, correct_count = ?, score = ?, submitted_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      JSON.stringify(submittedAnswers),
+      JSON.stringify(gradingDetail),
+      correctCount,
+      score,
+      assignmentId
+    );
+
+    res.json({
+      success: true,
+      assignment_id: assignmentId,
+      total_questions: safeTotal,
+      correct_count: correctCount,
+      score,
+      grading_detail: gradingDetail,
+      submitted_at: new Date().toISOString(),
+    });
   });
 
   app.get('/api/admin/progress', authenticate, requireAdmin, (req: any, res: any) => {

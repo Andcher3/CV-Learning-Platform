@@ -750,21 +750,24 @@ function AdminQuizzes() {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${token}` };
-      const [unitsRes, usersRes, recordsRes] = await Promise.all([
+      const [unitsRes, usersRes, recordsRes] = await Promise.allSettled([
         fetch(`${API_BASE_URL}/api/units`, { headers }),
         fetch(`${API_BASE_URL}/api/admin/users`, { headers }),
         fetch(`${API_BASE_URL}/api/admin/quizzes`, { headers })
       ]);
 
-      const unitsData = await unitsRes.json();
-      const usersData = await usersRes.json();
-      const recordsData = await recordsRes.json();
+      const unitsData = unitsRes.status === 'fulfilled' ? await unitsRes.value.json().catch(() => []) : [];
+      const usersData = usersRes.status === 'fulfilled' ? await usersRes.value.json().catch(() => []) : [];
+      const recordsData = recordsRes.status === 'fulfilled' ? await recordsRes.value.json().catch(() => []) : [];
 
       setUnits(Array.isArray(unitsData) ? unitsData : []);
       setStudents(Array.isArray(usersData) ? usersData.filter((u: any) => u.role === 'student') : []);
       setRecords(Array.isArray(recordsData) ? recordsData : []);
       if (!unitId && Array.isArray(unitsData) && unitsData.length > 0) {
         setUnitId(String(unitsData[0].id));
+      }
+      if (recordsRes.status === 'rejected') {
+        setError('测试记录接口暂不可用，但单元和学生可正常加载。');
       }
     } finally {
       setLoading(false);
