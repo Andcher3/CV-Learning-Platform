@@ -77,6 +77,9 @@ ${content || '无'}
 时间与进度信息：
 ${progressContext}
 
+该周总体计划指导文件（优先读取 plan_unit 路径，兼容 unit_plan 历史路径）：
+FILES: /data/admin/plan_unit/unit${unit.id}/计算机视觉大纲_${unit.id}.md, /data/admin/unit_plan/unit${unit.id}/计算机视觉大纲_${unit.id}.md
+
 请先根据时间与进度信息判断学生当前进度（超前/正常/落后），再输出调整后的学习计划。
 要求：
 1) 保留未完成且必要的任务，删除已完成任务；
@@ -94,6 +97,8 @@ ${progressContext}
 - 学生专属学习计划（文本）：${plan ? plan.plan_content : '无'}
 - 学生最终提交的学习笔记文字：${latestNote.content || '无'}
 - 附件情况：${latestNote.file_url ? '有附件（系统将附加文件内容）' : '无附件'}
+- 该周总体计划指导文件（优先读取 plan_unit 路径，兼容 unit_plan 历史路径）：
+FILES: /data/admin/plan_unit/unit${unit.id}/计算机视觉大纲_${unit.id}.md, /data/admin/unit_plan/unit${unit.id}/计算机视觉大纲_${unit.id}.md
 
 请先动态生成结构化评分量规（Rubric），再基于量规进行深度评估，给出各维度得分、得分/扣分理由与最终总分。
 

@@ -1,7 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
 import { MessageSquare, Send, Bot, User, X, ChevronRight, ChevronLeft } from 'lucide-react';
 
-export default function SidebarAI({ context, unitId }: { context: string; unitId?: string }) {
+export default function SidebarAI({
+  context,
+  unitId,
+  displayedPlan,
+  displayedPlanMeta,
+}: {
+  context: string;
+  unitId?: string;
+  displayedPlan?: string;
+  displayedPlanMeta?: string;
+}) {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [isOpen, setIsOpen] = useState(true);
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([]);
@@ -35,7 +45,13 @@ export default function SidebarAI({ context, unitId }: { context: string; unitId
           Accept: 'text/event-stream',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ question: userMsg, context, unitId }),
+        body: JSON.stringify({
+          question: userMsg,
+          context,
+          unitId,
+          displayedPlan,
+          displayedPlanMeta,
+        }),
       });
 
       const contentType = res.headers.get('content-type') || '';

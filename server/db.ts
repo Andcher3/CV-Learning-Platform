@@ -98,6 +98,17 @@ db.exec(`
     FOREIGN KEY(plan_id) REFERENCES study_plans(id),
     FOREIGN KEY(note_id) REFERENCES notes(id)
   );
+
+  CREATE TABLE IF NOT EXISTS study_plan_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    student_id INTEGER NOT NULL,
+    unit_id INTEGER NOT NULL,
+    plan_content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'unknown',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(student_id) REFERENCES users(id),
+    FOREIGN KEY(unit_id) REFERENCES units(id)
+  );
 `);
 
 // Add columns if they don't exist (for existing db)

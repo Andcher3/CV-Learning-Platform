@@ -142,6 +142,13 @@ async function startServer() {
     };
   };
 
+  const savePlanHistorySnapshot = (studentId: number, unitId: number, planContent: string, source: string) => {
+    const content = String(planContent || '').trim();
+    if (!content) return;
+    db.prepare('INSERT INTO study_plan_history (student_id, unit_id, plan_content, source) VALUES (?, ?, ?, ?)')
+      .run(studentId, unitId, content, source || 'unknown');
+  };
+
   const tryExtractPdfLocally = async (resolvedPath: string) => {
     try {
       const pdfParseModule: any = await import('pdf-parse');
@@ -963,6 +970,31 @@ async function startServer() {
   });
 
   // Study Plans
+  app.get('/api/plans/history/:unitId', authenticate, (req: any, res: any) => {
+    const unitId = Number(req.params.unitId);
+    if (!Number.isFinite(unitId) || unitId <= 0) {
+      return res.status(400).json({ error: 'Invalid unit id' });
+    }
+
+    const current = db.prepare(`
+      SELECT id, student_id, unit_id, plan_content, updated_at, created_at
+      FROM study_plans
+      WHERE student_id = ? AND unit_id = ?
+      LIMIT 1
+    `).get(req.user.id, unitId) as any;
+
+    const history = db.prepare(`
+      SELECT id, student_id, unit_id, plan_content, source, created_at
+      FROM study_plan_history
+      WHERE student_id = ? AND unit_id = ?
+      ORDER BY id DESC
+      LIMIT 20
+    `).all(req.user.id, unitId) as any[];
+
+    const previous = history[0] || null;
+    res.json({ current, previous, history });
+  });
+
   app.get('/api/plans/:unitId(\\d+)', authenticate, (req: any, res: any) => {
     const plan = db.prepare('SELECT * FROM study_plans WHERE student_id = ? AND unit_id = ?').get(req.user.id, req.params.unitId) as any;
     if (!plan) {
@@ -1088,7 +1120,7 @@ async function startServer() {
 
     try {
       const { client, model } = getAiClient();
-      const existing = db.prepare('SELECT id, generate_count, adjust_count, pretest_answer FROM study_plans WHERE student_id = ? AND unit_id = ?').get(req.user.id, unitId) as any;
+      const existing = db.prepare('SELECT id, plan_content, generate_count, adjust_count, pretest_answer FROM study_plans WHERE student_id = ? AND unit_id = ?').get(req.user.id, unitId) as any;
       const trimmedPretestAnswer = typeof pretestAnswer === 'string' ? pretestAnswer.trim() : '';
       const pretestFilePath = resolvePretestFilePath(Number(unitId));
       const pretestQuestion = fs.existsSync(pretestFilePath) ? fs.readFileSync(pretestFilePath, 'utf-8').trim() : '';
@@ -1219,6 +1251,9 @@ async function startServer() {
       }
 
       if (existing) {
+        if (String(existing?.plan_content || '').trim()) {
+          savePlanHistorySnapshot(req.user.id, Number(unitId), String(existing.plan_content), 'generate-regenerate');
+        }
         db.prepare(`UPDATE study_plans SET plan_content = ?, generate_count = COALESCE(generate_count, 0) + 1, pretest_answer = COALESCE(NULLIF(?, ''), pretest_answer), pretest_submitted_at = CASE WHEN TRIM(COALESCE(?, '')) <> '' THEN CURRENT_TIMESTAMP ELSE pretest_submitted_at END, updated_at = CURRENT_TIMESTAMP WHERE student_id = ? AND unit_id = ?`).run(planContent, trimmedPretestAnswer, trimmedPretestAnswer, req.user.id, unitId);
       } else {
         db.prepare('INSERT INTO study_plans (student_id, unit_id, plan_content, generate_count, adjust_count, pretest_answer, pretest_submitted_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)').run(req.user.id, unitId, planContent, 1, 0, trimmedPretestAnswer);
@@ -1448,6 +1483,9 @@ async function startServer() {
             newPlanContent = response.choices?.[0]?.message?.content?.trim() || plan.plan_content;
           }
 
+          if (String(plan.plan_content || '').trim()) {
+            savePlanHistorySnapshot(req.user.id, Number(unitId), String(plan.plan_content), 'note-adjust');
+          }
           db.prepare('UPDATE study_plans SET plan_content = ?, adjust_count = COALESCE(adjust_count, 0) + 1, adjust_daily_count = CASE WHEN adjust_daily_date = ? THEN COALESCE(adjust_daily_count, 0) + 1 ELSE 1 END, adjust_daily_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newPlanContent, todayKey, todayKey, plan.id);
 
           savePlanFile(req.user.id, Number(unitId), newPlanContent);
@@ -1551,7 +1589,7 @@ async function startServer() {
 
   // AI Assistant Chat
   app.post('/api/ai/chat', authenticate, async (req: any, res: any) => {
-    const { question, context, unitId } = req.body;
+    const { question, context, unitId, displayedPlan, displayedPlanMeta } = req.body;
     const wantsStream = String(req.query?.stream || '') === '1' || String(req.headers.accept || '').includes('text/event-stream');
     let heartbeatTimer: NodeJS.Timeout | null = null;
     let streamEnded = false;
@@ -1628,6 +1666,8 @@ async function startServer() {
     try {
       const { client, model } = getAiClient();
       let latestNoteContext = '';
+      let latestPlanContext = '';
+      let currentUnitContext = '';
       if (unitId) {
         const latestNote = db.prepare('SELECT content, file_url, created_at FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any;
         if (latestNote) {
@@ -1635,9 +1675,23 @@ async function startServer() {
         } else {
           latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n当前无笔记记录。\n`;
         }
+
+        if (String(displayedPlan || '').trim()) {
+          latestPlanContext = `\n【当前页面正在展示的学习计划（前端传入）】\n展示版本：${displayedPlanMeta || '未标注'}\n计划内容：${displayedPlan}\n`;
+        } else {
+          const latestPlan = db.prepare('SELECT plan_content, updated_at FROM study_plans WHERE student_id = ? AND unit_id = ? ORDER BY updated_at DESC, id DESC LIMIT 1').get(req.user.id, unitId) as any;
+          latestPlanContext = latestPlan
+            ? `\n【该学生在本单元当前学习计划（后端实时读取）】\n计划更新时间：${latestPlan.updated_at || '未知'}\n计划内容：${latestPlan.plan_content || '无'}\n`
+            : `\n【该学生在本单元当前学习计划（后端实时读取）】\n当前无学习计划记录。\n`;
+        }
+
+        const currentUnit = db.prepare('SELECT title, week_range, description, objectives, resources FROM units WHERE id = ?').get(unitId) as any;
+        if (currentUnit) {
+          currentUnitContext = `\n【当前单元基础信息（后端实时读取）】\n单元名称：${currentUnit.title || '未知'}\n周次：${currentUnit.week_range || '未知'}\n描述：${currentUnit.description || '无'}\n目标：${currentUnit.objectives || '无'}\n资源：${currentUnit.resources || '[]'}\n`;
+        }
       }
 
-      const mergedContext = `${context || ''}${latestNoteContext}`;
+      const mergedContext = `${context || ''}${currentUnitContext}${latestPlanContext}${latestNoteContext}`;
       const latestAttachment = unitId
         ? (db.prepare('SELECT file_url FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any)?.file_url
         : null;
@@ -1646,8 +1700,18 @@ async function startServer() {
         : latestAttachment && String(latestAttachment).startsWith('/uploads/')
           ? path.join(uploadsDir, path.basename(String(latestAttachment)))
           : null;
+      const outlinePathCandidates = unitId
+        ? [
+            path.join(DATA_DIR, `admin/plan_unit/unit${unitId}/计算机视觉大纲_${unitId}.md`),
+            path.join(DATA_DIR, `admin/unit_plan/unit${unitId}/计算机视觉大纲_${unitId}.md`),
+            path.join(process.cwd(), `data/admin/plan_unit/unit${unitId}/计算机视觉大纲_${unitId}.md`),
+            path.join(process.cwd(), `data/admin/unit_plan/unit${unitId}/计算机视觉大纲_${unitId}.md`),
+          ]
+        : [];
+      const outlinePath = outlinePathCandidates.find(candidate => fs.existsSync(candidate)) || null;
       const basePrompt = prompts.qaAssistant(mergedContext, question);
-      const promptWithAttachment = latestAttachmentFile ? `${basePrompt}\nFILES: ${latestAttachmentFile}` : basePrompt;
+      const filesForPrompt = [latestAttachmentFile, outlinePath].filter(Boolean) as string[];
+      const promptWithAttachment = filesForPrompt.length > 0 ? `${basePrompt}\nFILES: ${filesForPrompt.join(', ')}` : basePrompt;
       sendSse('stage', { message: '正在读取附件并生成回答...' });
       const { prompt, files } = await buildPromptWithFiles(promptWithAttachment, client);
 

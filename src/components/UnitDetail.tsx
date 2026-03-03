@@ -38,8 +38,25 @@ export default function UnitDetail() {
   const [submittingPretest, setSubmittingPretest] = useState(false);
   const [planStreamStatus, setPlanStreamStatus] = useState('');
   const [noteStreamStatus, setNoteStreamStatus] = useState('');
-  const renderedPlan = useMemo(() => renderMarkdownHtml(plan?.plan_content || ''), [plan?.plan_content]);
+  const [planHistory, setPlanHistory] = useState<any[]>([]);
+  const [planViewMode, setPlanViewMode] = useState<'current' | 'previous'>('current');
+  const previousPlan = planHistory[0] || null;
+  const displayedPlanContent = planViewMode === 'previous' && previousPlan?.plan_content
+    ? String(previousPlan.plan_content)
+    : String(plan?.plan_content || '');
+  const renderedPlan = useMemo(() => renderMarkdownHtml(displayedPlanContent), [displayedPlanContent]);
   const renderedPretestQuestion = useMemo(() => marked.parse(pretestQuestion || ''), [pretestQuestion]);
+
+  const loadPlanHistory = async (token: string) => {
+    const res = await fetch(`${API_BASE_URL}/api/plans/history/${id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.error || '计划历史加载失败');
+    }
+    setPlanHistory(Array.isArray(data?.history) ? data.history : []);
+  };
 
   const consumeEventStream = async (
     res: Response,
@@ -124,6 +141,8 @@ export default function UnitDetail() {
       .then(res => res.json())
       .then(data => setPlan(data));
 
+    loadPlanHistory(token).catch(console.error);
+
     fetch(`${API_BASE_URL}/api/notes/${id}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => res.json())
       .then(data => setNotes(data));
@@ -174,6 +193,8 @@ export default function UnitDetail() {
         }
 
         setPlan(finalPayload);
+        setPlanViewMode('current');
+        if (token) loadPlanHistory(token).catch(console.error);
         if (typeof finalPayload.remaining_generate_count === 'number') {
           setPlanActionMessage(`学习计划已更新。剩余可重生成次数：${finalPayload.remaining_generate_count}`);
         }
@@ -183,6 +204,8 @@ export default function UnitDetail() {
           throw new Error(data?.error || '学习计划生成失败');
         }
         setPlan(data);
+        setPlanViewMode('current');
+        if (token) loadPlanHistory(token).catch(console.error);
         if (typeof data.remaining_generate_count === 'number') {
           setPlanActionMessage(`学习计划已更新。剩余可重生成次数：${data.remaining_generate_count}`);
         }
@@ -315,6 +338,7 @@ export default function UnitDetail() {
       }
       if (noteData?.plan_content) {
         setPlan((prev: any) => ({ ...(prev || {}), plan_content: noteData.plan_content }));
+        setPlanViewMode('current');
       }
       setNewNote('');
       setFile(null);
@@ -326,7 +350,11 @@ export default function UnitDetail() {
         .then(data => setNotes(data));
       fetch(`${API_BASE_URL}/api/plans/${id}`, { headers: { Authorization: `Bearer ${token}` } })
         .then(res => res.json())
-        .then(data => setPlan(data));
+        .then(data => {
+          setPlan(data);
+          setPlanViewMode('current');
+        });
+      loadPlanHistory(token).catch(console.error);
     } catch (err) {
       console.error(err);
       setPlanActionError(err instanceof Error ? err.message : '笔记提交失败');
@@ -384,6 +412,8 @@ export default function UnitDetail() {
 当前学习计划：${plan?.plan_content || '无'}
 最近一次笔记：${notes[0]?.content || '无'}
 `;
+
+  const contextContentWithDisplayedPlan = `${contextContent}\n页面当前展示的计划版本：${planViewMode === 'previous' ? '上一版计划' : '当前计划'}\n页面当前展示的计划内容：${displayedPlanContent || '无'}\n`;
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -466,24 +496,41 @@ export default function UnitDetail() {
           {planActionError && <div className="text-sm text-rose-600 mb-3">{planActionError}</div>}
           
           {plan ? (
-            <div className="overflow-x-auto pb-2">
-              <div
-                className="max-w-none min-w-full text-slate-700 leading-7
-                [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:text-slate-900 [&_h1]:mt-6 [&_h1]:mb-4
-                [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-3
-                [&_h3]:text-xl [&_h3]:font-semibold [&_h3]:text-slate-900 [&_h3]:mt-4 [&_h3]:mb-2
-                [&_p]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-3
-                [&_li]:my-1 [&_a]:text-indigo-600 [&_a]:underline [&_strong]:font-semibold [&_strong]:text-slate-900
-                [&_blockquote]:border-l-4 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_blockquote]:text-slate-600 [&_blockquote]:italic [&_blockquote]:my-3
-                [&_hr]:my-6 [&_hr]:border-slate-200
-                [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
-                [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
-                [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
-                [&_table]:w-full [&_table]:min-w-max [&_table]:border-collapse [&_table]:my-4
-                [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left
-                [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2"
-                dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
-              />
+            <div>
+              <div className="overflow-x-auto pb-2">
+                <div
+                  className="max-w-none min-w-full text-slate-700 leading-7
+                  [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:text-slate-900 [&_h1]:mt-6 [&_h1]:mb-4
+                  [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-3
+                  [&_h3]:text-xl [&_h3]:font-semibold [&_h3]:text-slate-900 [&_h3]:mt-4 [&_h3]:mb-2
+                  [&_p]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-3
+                  [&_li]:my-1 [&_a]:text-indigo-600 [&_a]:underline [&_strong]:font-semibold [&_strong]:text-slate-900
+                  [&_blockquote]:border-l-4 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_blockquote]:text-slate-600 [&_blockquote]:italic [&_blockquote]:my-3
+                  [&_hr]:my-6 [&_hr]:border-slate-200
+                  [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
+                  [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
+                  [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
+                  [&_table]:w-full [&_table]:min-w-max [&_table]:border-collapse [&_table]:my-4
+                  [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left
+                  [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2"
+                  dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
+                />
+              </div>
+              <div className="mt-3 flex items-center justify-end gap-2 text-xs">
+                <button
+                  onClick={() => setPlanViewMode('current')}
+                  className={`px-3 py-1.5 rounded-lg border transition ${planViewMode === 'current' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                >
+                  当前计划
+                </button>
+                <button
+                  onClick={() => setPlanViewMode('previous')}
+                  disabled={!previousPlan}
+                  className={`px-3 py-1.5 rounded-lg border transition disabled:opacity-50 ${planViewMode === 'previous' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                >
+                  上一版计划
+                </button>
+              </div>
             </div>
           ) : (
             <div className="text-center py-8 text-slate-500">
@@ -622,7 +669,12 @@ export default function UnitDetail() {
       </div>
 
       {/* AI Sidebar */}
-      <SidebarAI context={contextContent} unitId={id} />
+      <SidebarAI
+        context={contextContentWithDisplayedPlan}
+        unitId={id}
+        displayedPlan={displayedPlanContent}
+        displayedPlanMeta={planViewMode === 'previous' ? '上一版计划' : '当前计划'}
+      />
 
       {showPretestModal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
