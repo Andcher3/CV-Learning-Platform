@@ -13,7 +13,16 @@ const unwrapOuterMarkdownFence = (text: string) => {
   return text || '';
 };
 
-const renderMarkdownHtml = (text: string) => marked.parse(unwrapOuterMarkdownFence(text || ''));
+const normalizeBareUrlBoundaries = (text: string) => {
+  const source = String(text || '');
+  return source.replace(/(https?:\/\/[^\s<>)\]}，。；！？、]+)(?=[\u4e00-\u9fff])/g, '<$1>');
+};
+
+const renderMarkdownHtml = (text: string) => {
+  const unwrapped = unwrapOuterMarkdownFence(text || '');
+  const normalized = normalizeBareUrlBoundaries(unwrapped);
+  return marked.parse(normalized);
+};
 
 export default function UnitDetail() {
   const { id } = useParams();
@@ -28,6 +37,7 @@ export default function UnitDetail() {
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [grading, setGrading] = useState(false);
   const [gradeResult, setGradeResult] = useState<any>(null);
+  const [gradeActionError, setGradeActionError] = useState('');
   const [submittingNote, setSubmittingNote] = useState(false);
   const [planActionMessage, setPlanActionMessage] = useState('');
   const [planActionError, setPlanActionError] = useState('');
@@ -388,6 +398,7 @@ export default function UnitDetail() {
 
   const gradeUnit = async () => {
     setGrading(true);
+    setGradeActionError('');
     const token = localStorage.getItem('token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/grade/${id}`, {
@@ -395,6 +406,9 @@ export default function UnitDetail() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '评分失败');
+      }
       setGradeResult(data);
       // Refresh notes to show grade
       fetch(`${API_BASE_URL}/api/notes/${id}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -402,6 +416,7 @@ export default function UnitDetail() {
         .then(data => setNotes(data));
     } catch (err) {
       console.error(err);
+      setGradeActionError(err instanceof Error ? err.message : '评分失败');
     } finally {
       setGrading(false);
     }
@@ -680,18 +695,21 @@ export default function UnitDetail() {
 
         {/* Grading Section */}
         {notes.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 mb-8 flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 mb-1">单元结课评分</h3>
-              <p className="text-slate-500 text-sm">根据最后一次提交的笔记和学习计划进行AI评分。</p>
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 mb-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 mb-1">单元结课评分</h3>
+                <p className="text-slate-500 text-sm">根据最后一次提交的笔记和学习计划进行AI评分。</p>
+              </div>
+              <button
+                onClick={gradeUnit}
+                disabled={grading}
+                className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 transition disabled:opacity-50"
+              >
+                {grading ? '评分中...' : '进行AI评分'}
+              </button>
             </div>
-            <button
-              onClick={gradeUnit}
-              disabled={grading}
-              className="bg-emerald-600 text-white px-6 py-2 rounded-lg hover:bg-emerald-700 transition disabled:opacity-50"
-            >
-              {grading ? '评分中...' : '进行AI评分'}
-            </button>
+            {gradeActionError && <div className="mt-3 text-sm text-rose-600">{gradeActionError}</div>}
           </div>
         )}
       </div>

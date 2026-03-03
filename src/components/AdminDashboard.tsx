@@ -12,7 +12,16 @@ const unwrapOuterMarkdownFence = (text: string) => {
   return text || '';
 };
 
-const renderMarkdownHtml = (text: string) => marked.parse(unwrapOuterMarkdownFence(text || ''));
+const normalizeBareUrlBoundaries = (text: string) => {
+  const source = String(text || '');
+  return source.replace(/(https?:\/\/[^\s<>)\]}，。；！？、]+)(?=[\u4e00-\u9fff])/g, '<$1>');
+};
+
+const renderMarkdownHtml = (text: string) => {
+  const unwrapped = unwrapOuterMarkdownFence(text || '');
+  const normalized = normalizeBareUrlBoundaries(unwrapped);
+  return marked.parse(normalized);
+};
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'users' | 'records' | 'feedbacks' | 'settings'>('users');

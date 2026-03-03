@@ -1523,6 +1523,13 @@ async function startServer() {
   // Grade Unit
   app.post('/api/grade/:unitId', authenticate, async (req: any, res: any) => {
     const { unitId } = req.params;
+    const startedAt = Date.now();
+    let promptBuildMs = 0;
+    let aiElapsedMs = 0;
+    let promptLength = 0;
+    let filesCount = 0;
+    console.log('[grade] request received unitId=%s user=%s', unitId, req.user?.id);
+
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
 
@@ -1540,26 +1547,45 @@ async function startServer() {
           ? path.join(uploadsDir, path.basename(String(latestNote.file_url)))
           : null;
       const promptWithNoteFile = noteAttachmentPath ? `${basePrompt}\nFILES: ${noteAttachmentPath}` : basePrompt;
+      const promptBuildStartedAt = Date.now();
       const { prompt, files } = await buildPromptWithFiles(promptWithNoteFile, client);
+      promptBuildMs = Date.now() - promptBuildStartedAt;
+      promptLength = prompt.length;
+      filesCount = files.length;
 
-      const response = await client.chat.completions.create({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-      });
+      const aiTimeoutMs = Number(process.env.AI_TIMEOUT_MS || 120000);
+      const callAiWithTimeout = async (messages: any[]) => {
+        let timeoutId: NodeJS.Timeout | null = null;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('AI_REQUEST_TIMEOUT')), aiTimeoutMs);
+        });
+
+        try {
+          return await Promise.race([
+            client.chat.completions.create({ model, messages }),
+            timeoutPromise
+          ]);
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+        }
+      };
+
+      const aiStartedAt = Date.now();
+      const response = await callAiWithTimeout([{ role: 'user', content: prompt }]);
+      aiElapsedMs += Date.now() - aiStartedAt;
 
       let raw = response.choices?.[0]?.message?.content || '';
       let result: any = parseGradeResult(raw);
 
       if (!result) {
         const repairPrompt = prompts.gradeRepair();
-        const retryResponse = await client.chat.completions.create({
-          model,
-          messages: [
-            { role: 'user', content: prompt },
-            { role: 'assistant', content: raw || '（空响应）' },
-            { role: 'user', content: repairPrompt }
-          ],
-        });
+        const retryStartedAt = Date.now();
+        const retryResponse = await callAiWithTimeout([
+          { role: 'user', content: prompt },
+          { role: 'assistant', content: raw || '（空响应）' },
+          { role: 'user', content: repairPrompt }
+        ]);
+        aiElapsedMs += Date.now() - retryStartedAt;
         raw = retryResponse.choices?.[0]?.message?.content || raw;
         result = parseGradeResult(raw);
       }
@@ -1577,10 +1603,16 @@ async function startServer() {
       }
 
       db.prepare('UPDATE notes SET grade = ?, feedback = ? WHERE id = ?').run(gradeText, feedbackValue, latestNote.id);
-
+      const elapsedMs = Date.now() - startedAt;
+      console.log('[grade] success total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s', elapsedMs, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id);
       res.json({ grade: gradeText, feedback: feedbackValue, prompt_preview: prompt, files_used: files, ai_raw: raw });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      const isTimeout = err?.message === 'AI_REQUEST_TIMEOUT';
+      const status = isTimeout ? 504 : 500;
+      const message = isTimeout ? 'AI grading timed out. Please try again.' : err?.message || '评分失败';
+      const elapsedMs = Date.now() - startedAt;
+      console.error('[grade] error total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s message=%s', elapsedMs, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id, message, err);
+      res.status(status).json({ error: message });
     }
   });
 
