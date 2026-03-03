@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, CheckCircle, Clock, BookOpen, MessageSquare, Send, Paperclip, Link as LinkIcon } from 'lucide-react';
+import { ArrowLeft, FileText, CheckCircle, Clock, BookOpen, MessageSquare, Send, Paperclip, Link as LinkIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import SidebarAI from './SidebarAI';
 import { marked } from 'marked';
 
@@ -39,11 +39,26 @@ export default function UnitDetail() {
   const [planStreamStatus, setPlanStreamStatus] = useState('');
   const [noteStreamStatus, setNoteStreamStatus] = useState('');
   const [planHistory, setPlanHistory] = useState<any[]>([]);
-  const [planViewMode, setPlanViewMode] = useState<'current' | 'previous'>('current');
-  const previousPlan = planHistory[0] || null;
-  const displayedPlanContent = planViewMode === 'previous' && previousPlan?.plan_content
-    ? String(previousPlan.plan_content)
-    : String(plan?.plan_content || '');
+  const [planViewIndex, setPlanViewIndex] = useState(0);
+  const planVersions = useMemo(() => {
+    const versions: any[] = [];
+    if (plan?.plan_content) {
+      versions.push({
+        id: `current-${plan?.id || 'na'}-${plan?.updated_at || ''}`,
+        plan_content: plan.plan_content,
+        source: 'current',
+        created_at: plan?.updated_at || plan?.created_at || '',
+      });
+    }
+    for (const item of planHistory) {
+      if (item?.plan_content) {
+        versions.push(item);
+      }
+    }
+    return versions;
+  }, [plan, planHistory]);
+  const displayedPlan = planVersions[planViewIndex] || null;
+  const displayedPlanContent = String(displayedPlan?.plan_content || '');
   const renderedPlan = useMemo(() => renderMarkdownHtml(displayedPlanContent), [displayedPlanContent]);
   const renderedPretestQuestion = useMemo(() => marked.parse(pretestQuestion || ''), [pretestQuestion]);
 
@@ -57,6 +72,13 @@ export default function UnitDetail() {
     }
     setPlanHistory(Array.isArray(data?.history) ? data.history : []);
   };
+
+  useEffect(() => {
+    setPlanViewIndex((prev) => {
+      if (planVersions.length === 0) return 0;
+      return Math.min(prev, planVersions.length - 1);
+    });
+  }, [planVersions.length]);
 
   const consumeEventStream = async (
     res: Response,
@@ -193,7 +215,7 @@ export default function UnitDetail() {
         }
 
         setPlan(finalPayload);
-        setPlanViewMode('current');
+        setPlanViewIndex(0);
         if (token) loadPlanHistory(token).catch(console.error);
         if (typeof finalPayload.remaining_generate_count === 'number') {
           setPlanActionMessage(`学习计划已更新。剩余可重生成次数：${finalPayload.remaining_generate_count}`);
@@ -204,7 +226,7 @@ export default function UnitDetail() {
           throw new Error(data?.error || '学习计划生成失败');
         }
         setPlan(data);
-        setPlanViewMode('current');
+        setPlanViewIndex(0);
         if (token) loadPlanHistory(token).catch(console.error);
         if (typeof data.remaining_generate_count === 'number') {
           setPlanActionMessage(`学习计划已更新。剩余可重生成次数：${data.remaining_generate_count}`);
@@ -338,7 +360,7 @@ export default function UnitDetail() {
       }
       if (noteData?.plan_content) {
         setPlan((prev: any) => ({ ...(prev || {}), plan_content: noteData.plan_content }));
-        setPlanViewMode('current');
+        setPlanViewIndex(0);
       }
       setNewNote('');
       setFile(null);
@@ -352,7 +374,7 @@ export default function UnitDetail() {
         .then(res => res.json())
         .then(data => {
           setPlan(data);
-          setPlanViewMode('current');
+          setPlanViewIndex(0);
         });
       loadPlanHistory(token).catch(console.error);
     } catch (err) {
@@ -413,7 +435,8 @@ export default function UnitDetail() {
 最近一次笔记：${notes[0]?.content || '无'}
 `;
 
-  const contextContentWithDisplayedPlan = `${contextContent}\n页面当前展示的计划版本：${planViewMode === 'previous' ? '上一版计划' : '当前计划'}\n页面当前展示的计划内容：${displayedPlanContent || '无'}\n`;
+  const displayedPlanLabel = displayedPlan?.source === 'current' ? '当前计划' : `历史计划#${planViewIndex}`;
+  const contextContentWithDisplayedPlan = `${contextContent}\n页面当前展示的计划版本：${displayedPlanLabel}\n页面当前展示的计划内容：${displayedPlanContent || '无'}\n`;
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -518,18 +541,23 @@ export default function UnitDetail() {
               </div>
               <div className="mt-3 flex items-center justify-end gap-2 text-xs">
                 <button
-                  onClick={() => setPlanViewMode('current')}
-                  className={`px-3 py-1.5 rounded-lg border transition ${planViewMode === 'current' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                  onClick={() => setPlanViewIndex(prev => Math.max(0, prev - 1))}
+                  disabled={planViewIndex <= 0}
+                  className="px-2 py-1.5 rounded-lg border bg-white text-slate-600 border-slate-300 hover:bg-slate-50 transition disabled:opacity-50"
                 >
-                  当前计划
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
+                <span className="text-slate-500">
+                  {planVersions.length > 0 ? `${planViewIndex + 1} / ${planVersions.length}` : '0 / 0'}
+                </span>
                 <button
-                  onClick={() => setPlanViewMode('previous')}
-                  disabled={!previousPlan}
-                  className={`px-3 py-1.5 rounded-lg border transition disabled:opacity-50 ${planViewMode === 'previous' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                  onClick={() => setPlanViewIndex(prev => Math.min(Math.max(planVersions.length - 1, 0), prev + 1))}
+                  disabled={planViewIndex >= planVersions.length - 1 || planVersions.length === 0}
+                  className="px-2 py-1.5 rounded-lg border bg-white text-slate-600 border-slate-300 hover:bg-slate-50 transition disabled:opacity-50"
                 >
-                  上一版计划
+                  <ChevronRight className="w-4 h-4" />
                 </button>
+                <span className="text-slate-500 ml-1">{displayedPlanLabel}</span>
               </div>
             </div>
           ) : (
@@ -673,7 +701,7 @@ export default function UnitDetail() {
         context={contextContentWithDisplayedPlan}
         unitId={id}
         displayedPlan={displayedPlanContent}
-        displayedPlanMeta={planViewMode === 'previous' ? '上一版计划' : '当前计划'}
+        displayedPlanMeta={displayedPlanLabel}
       />
 
       {showPretestModal && (
