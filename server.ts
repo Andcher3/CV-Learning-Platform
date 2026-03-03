@@ -679,14 +679,91 @@ async function startServer() {
   });
 
   app.post('/api/admin/progress/check-all', authenticate, requireAdmin, async (req: any, res: any) => {
+    const wantsStream = String(req.query?.stream || '') === '1' || String(req.headers.accept || '').includes('text/event-stream');
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    let streamEnded = false;
+    let clientDisconnected = false;
+
+    const sendSse = (event: string, payload: any) => {
+      if (!wantsStream || streamEnded || clientDisconnected) return;
+      try {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        if (typeof (res as any).flush === 'function') {
+          (res as any).flush();
+        }
+      } catch (err) {
+        clientDisconnected = true;
+      }
+    };
+
+    const closeSse = () => {
+      if (!wantsStream || streamEnded) return;
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      streamEnded = true;
+      if (clientDisconnected) return;
+      try {
+        res.end();
+      } catch (err) {}
+    };
+
+    const respondError = (status: number, error: string) => {
+      if (wantsStream) {
+        sendSse('error', { error, status });
+        closeSse();
+        return;
+      }
+      res.status(status).json({ error });
+    };
+
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+
+      heartbeatTimer = setInterval(() => {
+        sendSse('ping', { ts: Date.now() });
+      }, 10000);
+
+      req.on('aborted', () => {
+        clientDisconnected = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+
+      res.on('close', () => {
+        clientDisconnected = true;
+        streamEnded = true;
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      });
+    }
+
     try {
       const students = db.prepare("SELECT id, username FROM users WHERE role = 'student' ORDER BY id ASC").all() as any[];
       const results: any[] = [];
+      let remindCount = 0;
 
-      for (const student of students) {
+      if (wantsStream) {
+        sendSse('stage', { message: '开始检测学生进度...', total: students.length });
+      }
+
+      for (let i = 0; i < students.length; i++) {
+        const student = students[i];
         try {
           const checked = await evaluateStudentProgress(Number(student.id), 'manual-admin');
-          results.push({
+          const row = {
             student_id: student.id,
             student_username: student.username,
             status: checked.status,
@@ -697,9 +774,12 @@ async function startServer() {
             checked_at: checked.checked_at,
             trigger_source: checked.trigger_source,
             course_weekday: checked.course_weekday
-          });
+          };
+          results.push(row);
+          if (row.should_remind) remindCount += 1;
+          sendSse('result', { index: i + 1, total: students.length, row });
         } catch (err: any) {
-          results.push({
+          const row = {
             student_id: student.id,
             student_username: student.username,
             status: 'error',
@@ -710,18 +790,58 @@ async function startServer() {
             checked_at: new Date().toISOString(),
             trigger_source: 'manual-admin',
             course_weekday: getCourseWeekdayLabel(new Date())
-          });
+          };
+          results.push(row);
+          sendSse('result', { index: i + 1, total: students.length, row });
         }
       }
 
-      const remindCount = results.filter(item => item.should_remind).length;
-      res.json({
+      const payload = {
         total: students.length,
         remind_count: remindCount,
         results
+      };
+
+      if (wantsStream) {
+        sendSse('final', payload);
+        sendSse('done', { ok: true });
+        closeSse();
+        return;
+      }
+
+      res.json(payload);
+    } catch (err: any) {
+      respondError(500, err?.message || '批量检测失败');
+    }
+  });
+
+  app.post('/api/admin/progress/check/:studentId', authenticate, requireAdmin, async (req: any, res: any) => {
+    const studentId = Number(req.params.studentId);
+    if (!Number.isFinite(studentId) || studentId <= 0) {
+      return res.status(400).json({ error: '无效的学生ID' });
+    }
+
+    const student = db.prepare("SELECT id, username, role FROM users WHERE id = ?").get(studentId) as any;
+    if (!student || student.role !== 'student') {
+      return res.status(404).json({ error: '学生不存在' });
+    }
+
+    try {
+      const checked = await evaluateStudentProgress(studentId, 'manual-admin-single');
+      res.json({
+        student_id: student.id,
+        student_username: student.username,
+        status: checked.status,
+        lag_days: checked.lag_days,
+        should_remind: Number(checked.should_remind || 0) === 1,
+        reason: checked.reason,
+        suggestion: checked.suggestion,
+        checked_at: checked.checked_at,
+        trigger_source: checked.trigger_source,
+        course_weekday: checked.course_weekday
       });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || '批量检测失败' });
+      res.status(500).json({ error: err?.message || '检测失败' });
     }
   });
 

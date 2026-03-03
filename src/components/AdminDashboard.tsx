@@ -285,6 +285,7 @@ function AdminRecords() {
   const [progressRows, setProgressRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkingProgress, setCheckingProgress] = useState(false);
+  const [checkingStudentId, setCheckingStudentId] = useState<number | null>(null);
   const [progressMessage, setProgressMessage] = useState('');
 
   const resolveFileUrl = (fileUrl: string | null) => {
@@ -311,8 +312,108 @@ function AdminRecords() {
   const handleCheckAllProgress = async () => {
     setCheckingProgress(true);
     setProgressMessage('');
+    setProgressRows([]);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/progress/check-all`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/progress/check-all?stream=1`, {
+        method: 'POST',
+        headers: {
+          Accept: 'text/event-stream',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('text/event-stream') && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let streamError = '';
+
+        const processEventBlock = (rawBlock: string) => {
+          const lines = rawBlock.split('\n').map(line => line.trim()).filter(Boolean);
+          if (lines.length === 0) return;
+
+          let eventName = 'message';
+          const dataLines: string[] = [];
+          for (const line of lines) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+          }
+
+          let payload: any = {};
+          if (dataLines.length > 0) {
+            try {
+              payload = JSON.parse(dataLines.join('\n'));
+            } catch (err) {
+              payload = { raw: dataLines.join('\n') };
+            }
+          }
+
+          if (eventName === 'stage') {
+            setProgressMessage(payload?.message ? `${payload.message}（共 ${payload.total ?? 0} 人）` : '检测中...');
+            return;
+          }
+
+          if (eventName === 'result') {
+            const row = payload?.row;
+            if (!row) return;
+            setProgressRows((prev) => {
+              const idx = prev.findIndex(item => Number(item.student_id) === Number(row.student_id));
+              if (idx >= 0) {
+                const cloned = [...prev];
+                cloned[idx] = row;
+                return cloned;
+              }
+              return [...prev, row];
+            });
+            setProgressMessage(`检测进度：${payload?.index ?? 0}/${payload?.total ?? 0}`);
+            return;
+          }
+
+          if (eventName === 'final') {
+            setProgressMessage(`检测完成：共 ${payload?.total ?? 0} 名学生，需提醒 ${payload?.remind_count ?? 0} 人。`);
+            return;
+          }
+
+          if (eventName === 'error') {
+            streamError = String(payload?.error || '检测失败');
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split('\n\n');
+          buffer = blocks.pop() || '';
+          for (const block of blocks) {
+            processEventBlock(block);
+          }
+        }
+
+        if (buffer.trim()) processEventBlock(buffer);
+        if (streamError) throw new Error(streamError);
+      } else {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error || '检测失败');
+        }
+        setProgressRows(Array.isArray(data?.results) ? data.results : []);
+        setProgressMessage(`检测完成：共 ${data?.total ?? 0} 名学生，需提醒 ${data?.remind_count ?? 0} 人。`);
+      }
+    } catch (err: any) {
+      setProgressMessage(err?.message || '检测失败');
+    } finally {
+      setCheckingProgress(false);
+    }
+  };
+
+  const handleCheckSingleProgress = async (studentId: number) => {
+    setCheckingStudentId(studentId);
+    setProgressMessage('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/progress/check/${studentId}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
@@ -320,12 +421,20 @@ function AdminRecords() {
       if (!res.ok) {
         throw new Error(data?.error || '检测失败');
       }
-      setProgressRows(Array.isArray(data?.results) ? data.results : []);
-      setProgressMessage(`检测完成：共 ${data?.total ?? 0} 名学生，需提醒 ${data?.remind_count ?? 0} 人。`);
+      setProgressRows((prev) => {
+        const idx = prev.findIndex(item => Number(item.student_id) === Number(studentId));
+        if (idx >= 0) {
+          const cloned = [...prev];
+          cloned[idx] = data;
+          return cloned;
+        }
+        return [...prev, data];
+      });
+      setProgressMessage(`已完成学生 ${data?.student_username || studentId} 的进度检测。`);
     } catch (err: any) {
       setProgressMessage(err?.message || '检测失败');
     } finally {
-      setCheckingProgress(false);
+      setCheckingStudentId(null);
     }
   };
 
@@ -381,6 +490,7 @@ function AdminRecords() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">提醒</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">检测时间</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">原因</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">操作</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-200">
@@ -399,11 +509,20 @@ function AdminRecords() {
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.checked_at)}</td>
                       <td className="px-4 py-3 text-sm text-slate-700 max-w-md whitespace-pre-wrap">{item.reason || '-'}</td>
+                      <td className="px-4 py-3 text-sm whitespace-nowrap">
+                        <button
+                          onClick={() => handleCheckSingleProgress(Number(item.student_id))}
+                          disabled={checkingStudentId === Number(item.student_id)}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition disabled:opacity-50"
+                        >
+                          {checkingStudentId === Number(item.student_id) ? '检测中...' : '检测该学生'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {progressRows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-6 text-center text-slate-500">暂无进度检测结果</td>
+                      <td colSpan={8} className="px-4 py-6 text-center text-slate-500">暂无进度检测结果</td>
                     </tr>
                   )}
                 </tbody>
