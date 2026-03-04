@@ -14,7 +14,25 @@ const unwrapOuterMarkdownFence = (text: string) => {
 
 const normalizeBareUrlBoundaries = (text: string) => {
   const source = String(text || '');
-  return source.replace(/(https?:\/\/[^\s<>)\]}，。；！？、]+)(?=[\u4e00-\u9fff])/g, '<$1>');
+  return source.replace(/https?:\/\/[^\s<>"'`]+/g, (matched, offset, fullText) => {
+    const start = Number(offset || 0);
+    const prevChar = start > 0 ? fullText[start - 1] : '';
+    const nextChar = fullText[start + matched.length] || '';
+
+    if (prevChar === '<' && nextChar === '>') {
+      return matched;
+    }
+
+    let url = matched;
+    let suffix = '';
+    while (url.length > 0 && /[)\]}>》）】」』’”"'、，。；：！？,.!?;:]/.test(url[url.length - 1])) {
+      suffix = url[url.length - 1] + suffix;
+      url = url.slice(0, -1);
+    }
+
+    if (!url) return matched;
+    return `<${url}>${suffix}`;
+  });
 };
 
 const renderMarkdownHtml = (text: string) => {
