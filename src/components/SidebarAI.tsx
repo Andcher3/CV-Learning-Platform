@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, Send, Bot, User, X, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Send, Bot, ChevronRight, ChevronLeft } from 'lucide-react';
 
 export default function SidebarAI({
   context,
@@ -13,12 +13,40 @@ export default function SidebarAI({
   displayedPlanMeta?: string;
 }) {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(() => {
+    try {
+      const raw = localStorage.getItem('sidebar_ai_open');
+      if (raw === '0') return false;
+      if (raw === '1') return true;
+    } catch (err) {}
+    return true;
+  });
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const raw = Number(localStorage.getItem('sidebar_ai_width') || 360);
+      if (Number.isFinite(raw) && raw >= 280 && raw <= 760) return raw;
+    } catch (err) {}
+    return 360;
+  });
+  const [isResizing, setIsResizing] = useState(false);
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [streamStatus, setStreamStatus] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const resizeStartXRef = useRef(0);
+  const resizeStartWidthRef = useRef(0);
+
+  const getMaxWidth = () => {
+    if (typeof window === 'undefined') return 760;
+    return Math.max(320, Math.floor(window.innerWidth * 0.75));
+  };
+
+  const clampWidth = (width: number) => {
+    return Math.max(280, Math.min(getMaxWidth(), width));
+  };
+
+  const resolvedWidth = isOpen ? clampWidth(sidebarWidth) : 48;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -27,6 +55,53 @@ export default function SidebarAI({
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sidebar_ai_open', isOpen ? '1' : '0');
+    } catch (err) {}
+  }, [isOpen]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sidebar_ai_width', String(clampWidth(sidebarWidth)));
+    } catch (err) {}
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const deltaX = resizeStartXRef.current - event.clientX;
+      const nextWidth = clampWidth(resizeStartWidthRef.current + deltaX);
+      setSidebarWidth(nextWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isResizing]);
+
+  const handleResizeStart = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isOpen) return;
+    resizeStartXRef.current = event.clientX;
+    resizeStartWidthRef.current = sidebarWidth;
+    setIsResizing(true);
+  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -159,10 +234,18 @@ export default function SidebarAI({
 
   return (
     <div
-      className={`fixed right-0 top-0 h-full bg-white shadow-2xl border-l border-slate-200 transition-all duration-300 z-50 flex flex-col ${
-        isOpen ? 'w-96' : 'w-12'
-      }`}
+      className={`fixed right-0 top-0 h-full bg-white shadow-2xl border-l border-slate-200 transition-[width] duration-200 z-50 flex flex-col ${isResizing ? '' : ''}`}
+      style={{ width: `${resolvedWidth}px` }}
     >
+      {isOpen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整AI答疑面板宽度"
+          onMouseDown={handleResizeStart}
+          className="absolute left-0 top-0 h-full w-2 -translate-x-1 cursor-col-resize"
+        />
+      )}
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-slate-100 bg-indigo-50">
         {isOpen && (

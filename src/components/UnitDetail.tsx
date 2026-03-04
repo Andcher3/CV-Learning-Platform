@@ -640,25 +640,23 @@ export default function UnitDetail() {
           
           {plan ? (
             <div>
-              <div className="overflow-x-auto pb-2">
-                <div
-                  className="max-w-none min-w-full text-slate-700 leading-7
-                  [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:text-slate-900 [&_h1]:mt-6 [&_h1]:mb-4
-                  [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-3
-                  [&_h3]:text-xl [&_h3]:font-semibold [&_h3]:text-slate-900 [&_h3]:mt-4 [&_h3]:mb-2
-                  [&_p]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-3
-                  [&_li]:my-1 [&_a]:text-indigo-600 [&_a]:underline [&_strong]:font-semibold [&_strong]:text-slate-900
-                  [&_blockquote]:border-l-4 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_blockquote]:text-slate-600 [&_blockquote]:italic [&_blockquote]:my-3
-                  [&_hr]:my-6 [&_hr]:border-slate-200
-                  [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
-                  [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
-                  [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
-                  [&_table]:w-full [&_table]:min-w-max [&_table]:border-collapse [&_table]:my-4
-                  [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left
-                  [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2"
-                  dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
-                />
-              </div>
+              <div
+                className="max-w-none text-slate-700 leading-7 whitespace-normal break-words
+                [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:text-slate-900 [&_h1]:mt-6 [&_h1]:mb-4
+                [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-3
+                [&_h3]:text-xl [&_h3]:font-semibold [&_h3]:text-slate-900 [&_h3]:mt-4 [&_h3]:mb-2
+                [&_p]:my-3 [&_p]:break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-3
+                [&_li]:my-1 [&_li]:break-words [&_a]:text-indigo-600 [&_a]:underline [&_a]:break-all [&_strong]:font-semibold [&_strong]:text-slate-900
+                [&_blockquote]:border-l-4 [&_blockquote]:border-slate-300 [&_blockquote]:pl-4 [&_blockquote]:text-slate-600 [&_blockquote]:italic [&_blockquote]:my-3
+                [&_hr]:my-6 [&_hr]:border-slate-200
+                [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
+                [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
+                [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
+                [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:border-collapse [&_table]:my-4
+                [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:whitespace-nowrap
+                [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:whitespace-nowrap"
+                dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
+              />
               <div className="mt-3 flex items-center justify-end gap-2 text-xs">
                 <button
                   onClick={() => setPlanViewIndex(prev => Math.max(0, prev - 1))}
