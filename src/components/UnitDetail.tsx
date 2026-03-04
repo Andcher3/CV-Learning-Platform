@@ -65,6 +65,8 @@ export default function UnitDetail() {
   const [pretestAnswer, setPretestAnswer] = useState('');
   const [loadingPretest, setLoadingPretest] = useState(false);
   const [submittingPretest, setSubmittingPretest] = useState(false);
+  const [showRegenerateModal, setShowRegenerateModal] = useState(false);
+  const [regenerateContext, setRegenerateContext] = useState('');
   const [planStreamStatus, setPlanStreamStatus] = useState('');
   const [noteStreamStatus, setNoteStreamStatus] = useState('');
   const [quizAssignment, setQuizAssignment] = useState<any>(null);
@@ -267,7 +269,7 @@ export default function UnitDetail() {
     }
   };
 
-  const generatePlan = async (inputPretestAnswer = '') => {
+  const generatePlan = async (inputPretestAnswer = '', inputRegenerateContext = '') => {
     setLoadingPlan(true);
     setPlanActionError('');
     setPlanActionMessage('');
@@ -281,7 +283,11 @@ export default function UnitDetail() {
           Accept: 'text/event-stream',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ unitId: id, pretestAnswer: inputPretestAnswer }),
+        body: JSON.stringify({
+          unitId: id,
+          pretestAnswer: inputPretestAnswer,
+          regenerateContext: inputRegenerateContext
+        }),
       });
 
       const contentType = res.headers.get('content-type') || '';
@@ -341,7 +347,8 @@ export default function UnitDetail() {
 
   const handlePlanButtonClick = async () => {
     if (plan) {
-      await generatePlan();
+      setRegenerateContext('');
+      setShowRegenerateModal(true);
       return;
     }
 
@@ -388,6 +395,12 @@ export default function UnitDetail() {
     } finally {
       setSubmittingPretest(false);
     }
+  };
+
+  const submitRegenerateAndGenerate = async () => {
+    const brief = regenerateContext.trim();
+    setShowRegenerateModal(false);
+    await generatePlan('', brief);
   };
 
   const submitNote = async () => {
@@ -670,9 +683,9 @@ export default function UnitDetail() {
                 [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
                 [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
                 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
-                [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:border-collapse [&_table]:my-4
+                [&_table]:block [&_table]:w-max [&_table]:max-w-[1200px] [&_table]:overflow-x-auto [&_table]:border-collapse [&_table]:my-4
                 [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:whitespace-nowrap
-                [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:whitespace-nowrap"
+                [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:max-w-[20rem] [&_td]:whitespace-normal [&_td]:break-words"
                 dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
               />
               <div className="mt-3 flex items-center justify-end gap-2 text-xs">
@@ -958,6 +971,43 @@ export default function UnitDetail() {
                 className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50"
               >
                 {submittingPretest || loadingPlan ? '提交并生成中...' : '提交答案并生成计划'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRegenerateModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl border border-slate-200 p-6">
+            <h3 className="text-xl font-bold text-slate-900 mb-2">重新生成学习计划</h3>
+            <p className="text-sm text-slate-600 mb-4">可选：简短说明你当前的学习情况（如时间安排、难点、目标），AI 会据此调整计划。</p>
+
+            <label className="block text-sm font-medium text-slate-700 mb-2">你的情况说明（可留空）</label>
+            <textarea
+              value={regenerateContext}
+              onChange={(e) => setRegenerateContext(e.target.value)}
+              className="w-full h-32 px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"
+              placeholder="例如：这周只有周末能学习；卷积部分还不理解；希望多一些练习题。"
+            />
+
+            <div className="mt-4 flex items-center justify-end gap-3">
+              <button
+                onClick={() => {
+                  if (loadingPlan) return;
+                  setShowRegenerateModal(false);
+                }}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 transition"
+                disabled={loadingPlan}
+              >
+                取消
+              </button>
+              <button
+                onClick={submitRegenerateAndGenerate}
+                disabled={loadingPlan}
+                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50"
+              >
+                {loadingPlan ? '生成中...' : '确认并生成'}
               </button>
             </div>
           </div>

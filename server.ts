@@ -1373,7 +1373,7 @@ async function startServer() {
 
   app.post('/api/plans/generate', authenticate, async (req: any, res: any) => {
     const startedAt = Date.now();
-    const { unitId, prompt: clientPrompt, pretestAnswer } = req.body;
+    const { unitId, prompt: clientPrompt, pretestAnswer, regenerateContext } = req.body;
     const wantsStream = String(req.query?.stream || '') === '1' || String(req.headers.accept || '').includes('text/event-stream');
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
 
@@ -1487,6 +1487,11 @@ async function startServer() {
       const knowledgeAnswer = trimmedPretestAnswer || String(existing?.pretest_answer || '').trim();
       if (pretestQuestion || knowledgeAnswer) {
         basePrompt = prompts.buildPlanPrompt(basePrompt, pretestQuestion, knowledgeAnswer);
+      }
+
+      const regenerateNote = String(regenerateContext || '').trim();
+      if (regenerateNote) {
+        basePrompt = `${basePrompt}\n\n[学生补充情况说明]\n${regenerateNote}\n\n请结合上述“学生补充情况说明”对计划进行针对性调整，重点在时间安排、任务粒度与优先级上体现。`;
       }
 
       sendSse('stage', { message: '正在读取资料并构建提示词...' });
