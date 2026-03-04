@@ -693,7 +693,7 @@ export default function UnitDetail() {
                 [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
                 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
                 [&_.plan-table-scroll]:max-w-full [&_.plan-table-scroll]:overflow-x-auto [&_.plan-table-scroll]:pb-1 [&_.plan-table-scroll]:my-4
-                [&_.plan-table-scroll_table]:w-max [&_.plan-table-scroll_table]:min-w-[720px] [&_.plan-table-scroll_table]:max-w-[1800px] [&_.plan-table-scroll_table]:border-collapse [&_.plan-table-scroll_table]:my-0
+                [&_.plan-table-scroll_table]:w-max [&_.plan-table-scroll_table]:min-w-[720px] [&_.plan-table-scroll_table]:max-w-[2400px] [&_.plan-table-scroll_table]:border-collapse [&_.plan-table-scroll_table]:my-0
                 [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:whitespace-nowrap
                 [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:max-w-[20rem] [&_td]:whitespace-normal [&_td]:break-words"
                 dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
