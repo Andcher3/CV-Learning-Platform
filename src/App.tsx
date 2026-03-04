@@ -8,6 +8,7 @@ import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import UnitDetail from './components/UnitDetail';
 import AdminDashboard from './components/AdminDashboard';
+import ResourcesHub from './components/ResourcesHub';
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/resources" element={<ResourcesHub />} />
         <Route path="/unit/:id" element={<UnitDetail />} />
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />

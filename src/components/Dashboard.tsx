@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, LogOut, FileText, CheckCircle } from 'lucide-react';
+import { BookOpen, LogOut, FileText, CheckCircle, Library } from 'lucide-react';
 
 export default function Dashboard() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -213,6 +213,23 @@ export default function Dashboard() {
               </button>
             </div>
           </form>
+        </div>
+
+        <div
+          onClick={() => navigate('/resources')}
+          className="mb-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-md transition group"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-900 flex items-center">
+                <Library className="w-5 h-5 mr-2 text-indigo-600" /> 课程资源总览
+              </h2>
+              <p className="text-slate-600 mt-1 text-sm">
+                汇总核心理论、课程、实操代码库与前置知识补丁，点击进入资源页。
+              </p>
+            </div>
+            <span className="text-indigo-600 text-sm font-medium group-hover:text-indigo-800 transition">进入资源页 &rarr;</span>
+          </div>
         </div>
 
         <div className="mb-8">
