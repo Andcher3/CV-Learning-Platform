@@ -345,12 +345,14 @@ export default function UnitDetail() {
     }
   };
 
-  const handlePlanButtonClick = async () => {
-    if (plan) {
-      setRegenerateContext('');
-      setShowRegenerateModal(true);
-      return;
-    }
+  const openRegenerateModal = () => {
+    setPlanActionError('');
+    setPlanActionMessage('');
+    setRegenerateContext('');
+    setShowRegenerateModal(true);
+  };
+
+  const handleFirstGenerateClick = async () => {
 
     setLoadingPretest(true);
     setPlanActionError('');
@@ -654,7 +656,7 @@ export default function UnitDetail() {
               <Clock className="w-6 h-6 mr-2 text-indigo-600" /> AI 学习计划
             </h2>
             <button
-              onClick={handlePlanButtonClick}
+              onClick={plan ? openRegenerateModal : handleFirstGenerateClick}
               disabled={loadingPlan || loadingPretest || remainingGenerateCount <= 0}
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50"
             >
@@ -683,7 +685,7 @@ export default function UnitDetail() {
                 [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
                 [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
                 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
-                [&_table]:block [&_table]:w-max [&_table]:max-w-[1200px] [&_table]:overflow-x-auto [&_table]:border-collapse [&_table]:my-4
+                [&_table]:block [&_table]:w-max [&_table]:max-w-[800px] [&_table]:overflow-x-auto [&_table]:border-collapse [&_table]:my-4
                 [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:whitespace-nowrap
                 [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:max-w-[20rem] [&_td]:whitespace-normal [&_td]:break-words"
                 dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
