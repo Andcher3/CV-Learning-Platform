@@ -39,7 +39,14 @@ const normalizeBareUrlBoundaries = (text: string) => {
 const renderMarkdownHtml = (text: string) => {
   const unwrapped = unwrapOuterMarkdownFence(text || '');
   const normalized = normalizeBareUrlBoundaries(unwrapped);
-  return marked.parse(normalized);
+  return marked.parse(normalized) as string;
+};
+
+const wrapPlanTablesForScroll = (html: string) => {
+  const source = String(html || '');
+  return source
+    .replace(/<table>/g, '<div class="plan-table-scroll"><table>')
+    .replace(/<\/table>/g, '</table></div>');
 };
 
 export default function UnitDetail() {
@@ -96,7 +103,7 @@ export default function UnitDetail() {
   }, [plan, planHistory]);
   const displayedPlan = planVersions[planViewIndex] || null;
   const displayedPlanContent = String(displayedPlan?.plan_content || '');
-  const renderedPlan = useMemo(() => renderMarkdownHtml(displayedPlanContent), [displayedPlanContent]);
+  const renderedPlan = useMemo(() => wrapPlanTablesForScroll(renderMarkdownHtml(displayedPlanContent)), [displayedPlanContent]);
   const renderedPretestQuestion = useMemo(() => marked.parse(pretestQuestion || ''), [pretestQuestion]);
 
   const loadPlanHistory = async (token: string) => {
@@ -685,7 +692,8 @@ export default function UnitDetail() {
                 [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
                 [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
                 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
-                [&_table]:block [&_table]:w-max [&_table]:max-w-[800px] [&_table]:overflow-x-auto [&_table]:border-collapse [&_table]:my-4
+                [&_.plan-table-scroll]:max-w-full [&_.plan-table-scroll]:overflow-x-auto [&_.plan-table-scroll]:pb-1 [&_.plan-table-scroll]:my-4
+                [&_.plan-table-scroll_table]:w-max [&_.plan-table-scroll_table]:min-w-[720px] [&_.plan-table-scroll_table]:max-w-[1200px] [&_.plan-table-scroll_table]:border-collapse [&_.plan-table-scroll_table]:my-0
                 [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:whitespace-nowrap
                 [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:max-w-[20rem] [&_td]:whitespace-normal [&_td]:break-words"
                 dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
