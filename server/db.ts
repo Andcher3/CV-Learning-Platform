@@ -270,14 +270,98 @@ if (unitsCount.count === 0) {
         { title: '数据增广编程实现', url: 'https://zh.d2l.ai/chapter_computer-vision/image-augmentation.html' }
       ])
     },
-    { title: '相机模型', week_range: '4-5', description: '针孔相机模型、相机校准基础', objectives: '理解针孔相机模型原理，掌握相机校准基础方法。', resources: '[]' },
-    { title: '深度学习基础', week_range: '5-6', description: '多层感知机，卷积神经网络', objectives: '掌握多层感知机和CNN的基本结构与原理。', resources: '[]' },
-    { title: 'Transformer', week_range: '7', description: '注意力机制, 网络基础, 编程实践', objectives: '理解注意力机制，掌握Transformer网络结构与实践。', resources: '[]' },
-    { title: '目标检测基础', week_range: '8', description: '检测基础、SSD检测模型', objectives: '了解目标检测基础概念，掌握SSD模型原理。', resources: '[]' },
-    { title: '目标检测进阶', week_range: '9', description: 'DETR 检测模型', objectives: '深入学习DETR等先进目标检测模型。', resources: '[]' },
-    { title: '语义分割', week_range: '10', description: '分割基础、转置卷积、全卷积', objectives: '掌握语义分割基本概念，理解全卷积网络。', resources: '[]' },
-    { title: '生成模型', week_range: '11', description: 'GAN, VAE', objectives: '理解生成对抗网络(GAN)和变分自编码器(VAE)原理。', resources: '[]' },
-    { title: '风格迁移', week_range: '12', description: '概念、模型结构、学习方法', objectives: '掌握风格迁移的基本概念、模型结构及实现方法。', resources: '[]' },
+    {
+      title: '相机模型',
+      week_range: '4-5',
+      description: '针孔相机模型、相机校准基础',
+      objectives: '掌握针孔相机模型、内参/外参与相机标定基本方法，能够运行标定代码并输出相机内参矩阵。',
+      resources: JSON.stringify([
+        { title: '鲁鹏计算机视觉：第6讲 相机模型（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第6讲 相机模型' },
+        { title: '鲁鹏计算机视觉：第7讲前半 相机标定（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第7讲 相机标定' },
+        { title: 'Programming Computer Vision with Python（第4章）', url: 'http://programmingcomputervision.com/', description: '运行相机标定代码并输出相机内参矩阵' },
+        { title: 'OpenCV 相机标定官方教程', url: 'https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html' },
+        { title: 'Computer Vision: Algorithms and Applications（第2章）', url: 'http://szeliski.org/Book/' }
+      ])
+    },
+    {
+      title: '深度学习基础',
+      week_range: '5-6',
+      description: '多层感知机，卷积神经网络',
+      objectives: '理解反向传播与卷积神经网络核心机制，能够完成两层神经网络前向/反向传播基础实现。',
+      resources: JSON.stringify([
+        { title: 'CS231n Lecture 4：Backpropagation', url: 'https://cs231n.github.io/optimization-2/' },
+        { title: 'CS231n Lecture 5：Convolutional Neural Networks', url: 'https://cs231n.github.io/convolutional-networks/' },
+        { title: 'CS231n Assignment 1（官方）', url: 'https://github.com/cs231n/cs231n.github.io/tree/master/assignments' },
+        { title: 'Deep Learning（花书）', url: 'https://www.deeplearningbook.org/', description: '建议阅读第6章与第9章' }
+      ])
+    },
+    {
+      title: 'Transformer',
+      week_range: '7',
+      description: '注意力机制, 网络基础, 编程实践',
+      objectives: '掌握自注意力与多头注意力机制，能够调用 ViT 模型完成图片分类并记录预测类别与置信度。',
+      resources: JSON.stringify([
+        { title: '李宏毅深度学习课程：Self-Attention and Transformer', url: 'https://speech.ee.ntu.edu.tw/~hylee/index.html', description: '可在 B站 搜索同名视频' },
+        { title: 'HuggingFace 图像分类任务文档', url: 'https://huggingface.co/docs/transformers/tasks/image_classification' },
+        { title: 'Vision Transformer 论文', url: 'https://arxiv.org/abs/2010.11929' }
+      ])
+    },
+    {
+      title: '目标检测基础',
+      week_range: '8',
+      description: '检测基础、SSD检测模型',
+      objectives: '理解目标检测中的 Anchor 与 NMS 等基础概念，能够使用 torchvision 的 SSD 预训练模型完成推理与可视化。',
+      resources: JSON.stringify([
+        { title: 'CS231n 目标检测笔记', url: 'https://cs231n.github.io/detection/' },
+        { title: 'torchvision 模型库（目标检测）', url: 'https://pytorch.org/vision/stable/models.html#object-detection' },
+        { title: 'PyTorch torchvision 检测实战教程', url: 'https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html' },
+        { title: 'YOLOv5（可选）', url: 'https://github.com/ultralytics/yolov5' }
+      ])
+    },
+    {
+      title: '目标检测进阶',
+      week_range: '9',
+      description: 'DETR 检测模型',
+      objectives: '理解 DETR 与匈牙利匹配的核心思想，能够使用 DETR 模型对图片进行端到端目标检测并可视化结果。',
+      resources: JSON.stringify([
+        { title: '李沐论文精讲：DETR（B站检索）', url: '', description: '关键词：李沐 论文精读 DETR' },
+        { title: 'HuggingFace DETR 文档', url: 'https://huggingface.co/docs/transformers/model_doc/detr' },
+        { title: 'DETR 论文', url: 'https://arxiv.org/abs/2005.12872' }
+      ])
+    },
+    {
+      title: '语义分割',
+      week_range: '10',
+      description: '分割基础、转置卷积、全卷积',
+      objectives: '掌握 FCN、转置卷积与 DeepLab 等语义分割关键概念，能够完成 DeepLabV3 推理并输出可视化分割结果。',
+      resources: JSON.stringify([
+        { title: 'CS231n 语义分割笔记', url: 'https://cs231n.github.io/semantic-segmentation/' },
+        { title: 'D2L：转置卷积', url: 'https://zh.d2l.ai/chapter_computer-vision/transposed-conv.html' },
+        { title: 'torchvision DeepLabV3 文档', url: 'https://pytorch.org/vision/stable/models/generated/torchvision.models.segmentation.deeplabv3_resnet50.html' }
+      ])
+    },
+    {
+      title: '生成模型',
+      week_range: '11',
+      description: 'GAN, VAE',
+      objectives: '理解 GAN 的生成器/判别器对抗训练思路，能够运行 PyTorch DCGAN 教程并生成图像结果。',
+      resources: JSON.stringify([
+        { title: 'CS231n 生成模型笔记（含GAN）', url: 'https://cs231n.github.io/generative-models/' },
+        { title: 'PyTorch DCGAN 官方教程', url: 'https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html' },
+        { title: 'GAN 原始论文', url: 'https://arxiv.org/abs/1406.2661' }
+      ])
+    },
+    {
+      title: '风格迁移',
+      week_range: '12',
+      description: '概念、模型结构、学习方法',
+      objectives: '掌握内容损失、风格损失与格拉姆矩阵等核心概念，能够运行神经风格迁移并保存融合结果图。',
+      resources: JSON.stringify([
+        { title: 'CS231n 神经风格迁移笔记', url: 'https://cs231n.github.io/neural-style-transfer/' },
+        { title: 'PyTorch Neural Style Transfer 教程', url: 'https://pytorch.org/tutorials/advanced/neural_style_tutorial.html' },
+        { title: 'CycleGAN（可选进阶）', url: 'https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix' }
+      ])
+    },
   ];
   const insertUnit = db.prepare('INSERT INTO units (title, week_range, description, objectives, resources) VALUES (?, ?, ?, ?, ?)');
   const insertMany = db.transaction((units) => {
@@ -314,6 +398,93 @@ if (unitsCount.count === 0) {
         { title: '数据增广编程实现', url: 'https://zh.d2l.ai/chapter_computer-vision/image-augmentation.html' }
       ])
     );
+  }
+
+  const unitBackfillPatches = [
+    {
+      id: 3,
+      objectives: '掌握针孔相机模型、内参/外参与相机标定基本方法，能够运行标定代码并输出相机内参矩阵。',
+      resources: JSON.stringify([
+        { title: '鲁鹏计算机视觉：第6讲 相机模型（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第6讲 相机模型' },
+        { title: '鲁鹏计算机视觉：第7讲前半 相机标定（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第7讲 相机标定' },
+        { title: 'Programming Computer Vision with Python（第4章）', url: 'http://programmingcomputervision.com/', description: '运行相机标定代码并输出相机内参矩阵' },
+        { title: 'OpenCV 相机标定官方教程', url: 'https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html' },
+        { title: 'Computer Vision: Algorithms and Applications（第2章）', url: 'http://szeliski.org/Book/' }
+      ])
+    },
+    {
+      id: 4,
+      objectives: '理解反向传播与卷积神经网络核心机制，能够完成两层神经网络前向/反向传播基础实现。',
+      resources: JSON.stringify([
+        { title: 'CS231n Lecture 4：Backpropagation', url: 'https://cs231n.github.io/optimization-2/' },
+        { title: 'CS231n Lecture 5：Convolutional Neural Networks', url: 'https://cs231n.github.io/convolutional-networks/' },
+        { title: 'CS231n Assignment 1（官方）', url: 'https://github.com/cs231n/cs231n.github.io/tree/master/assignments' },
+        { title: 'Deep Learning（花书）', url: 'https://www.deeplearningbook.org/', description: '建议阅读第6章与第9章' }
+      ])
+    },
+    {
+      id: 5,
+      objectives: '掌握自注意力与多头注意力机制，能够调用 ViT 模型完成图片分类并记录预测类别与置信度。',
+      resources: JSON.stringify([
+        { title: '李宏毅深度学习课程：Self-Attention and Transformer', url: 'https://speech.ee.ntu.edu.tw/~hylee/index.html', description: '可在 B站 搜索同名视频' },
+        { title: 'HuggingFace 图像分类任务文档', url: 'https://huggingface.co/docs/transformers/tasks/image_classification' },
+        { title: 'Vision Transformer 论文', url: 'https://arxiv.org/abs/2010.11929' }
+      ])
+    },
+    {
+      id: 6,
+      objectives: '理解目标检测中的 Anchor 与 NMS 等基础概念，能够使用 torchvision 的 SSD 预训练模型完成推理与可视化。',
+      resources: JSON.stringify([
+        { title: 'CS231n 目标检测笔记', url: 'https://cs231n.github.io/detection/' },
+        { title: 'torchvision 模型库（目标检测）', url: 'https://pytorch.org/vision/stable/models.html#object-detection' },
+        { title: 'PyTorch torchvision 检测实战教程', url: 'https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html' },
+        { title: 'YOLOv5（可选）', url: 'https://github.com/ultralytics/yolov5' }
+      ])
+    },
+    {
+      id: 7,
+      objectives: '理解 DETR 与匈牙利匹配的核心思想，能够使用 DETR 模型对图片进行端到端目标检测并可视化结果。',
+      resources: JSON.stringify([
+        { title: '李沐论文精讲：DETR（B站检索）', url: '', description: '关键词：李沐 论文精读 DETR' },
+        { title: 'HuggingFace DETR 文档', url: 'https://huggingface.co/docs/transformers/model_doc/detr' },
+        { title: 'DETR 论文', url: 'https://arxiv.org/abs/2005.12872' }
+      ])
+    },
+    {
+      id: 8,
+      objectives: '掌握 FCN、转置卷积与 DeepLab 等语义分割关键概念，能够完成 DeepLabV3 推理并输出可视化分割结果。',
+      resources: JSON.stringify([
+        { title: 'CS231n 语义分割笔记', url: 'https://cs231n.github.io/semantic-segmentation/' },
+        { title: 'D2L：转置卷积', url: 'https://zh.d2l.ai/chapter_computer-vision/transposed-conv.html' },
+        { title: 'torchvision DeepLabV3 文档', url: 'https://pytorch.org/vision/stable/models/generated/torchvision.models.segmentation.deeplabv3_resnet50.html' }
+      ])
+    },
+    {
+      id: 9,
+      objectives: '理解 GAN 的生成器/判别器对抗训练思路，能够运行 PyTorch DCGAN 教程并生成图像结果。',
+      resources: JSON.stringify([
+        { title: 'CS231n 生成模型笔记（含GAN）', url: 'https://cs231n.github.io/generative-models/' },
+        { title: 'PyTorch DCGAN 官方教程', url: 'https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html' },
+        { title: 'GAN 原始论文', url: 'https://arxiv.org/abs/1406.2661' }
+      ])
+    },
+    {
+      id: 10,
+      objectives: '掌握内容损失、风格损失与格拉姆矩阵等核心概念，能够运行神经风格迁移并保存融合结果图。',
+      resources: JSON.stringify([
+        { title: 'CS231n 神经风格迁移笔记', url: 'https://cs231n.github.io/neural-style-transfer/' },
+        { title: 'PyTorch Neural Style Transfer 教程', url: 'https://pytorch.org/tutorials/advanced/neural_style_tutorial.html' },
+        { title: 'CycleGAN（可选进阶）', url: 'https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix' }
+      ])
+    }
+  ];
+
+  const patchUnit = db.prepare('UPDATE units SET objectives = ?, resources = ? WHERE id = ?');
+  for (const patch of unitBackfillPatches) {
+    const current = db.prepare('SELECT resources FROM units WHERE id = ?').get(patch.id) as any;
+    if (current && (!current.resources || current.resources === '[]')) {
+      patchUnit.run(patch.objectives, patch.resources, patch.id);
+    }
   }
 }
 
