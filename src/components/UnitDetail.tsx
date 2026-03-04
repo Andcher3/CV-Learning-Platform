@@ -49,6 +49,91 @@ const wrapPlanTablesForScroll = (html: string) => {
     .replace(/<\/table>/g, '</table></div>');
 };
 
+const optimizePlanTablesLayout = (html: string) => {
+  const source = String(html || '');
+  if (!source.includes('<table')) return source;
+  if (typeof window === 'undefined') return wrapPlanTablesForScroll(source);
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div id="plan-root">${source}</div>`, 'text/html');
+    const root = doc.querySelector('#plan-root');
+    if (!root) return wrapPlanTablesForScroll(source);
+
+    root.querySelectorAll('table').forEach((table) => {
+      const rows = Array.from(table.querySelectorAll('tr'));
+      let colCount = 0;
+      for (const row of rows) {
+        let count = 0;
+        for (const cell of Array.from(row.children) as HTMLTableCellElement[]) {
+          count += Math.max(1, Number(cell.colSpan || 1));
+        }
+        colCount = Math.max(colCount, count);
+      }
+      if (colCount <= 0) return;
+
+      const scores = new Array(colCount).fill(1);
+      rows.forEach((row, rowIndex) => {
+        let cursor = 0;
+        for (const cell of Array.from(row.children) as HTMLTableCellElement[]) {
+          const span = Math.max(1, Number(cell.colSpan || 1));
+          const text = String(cell.textContent || '').replace(/\s+/g, ' ').trim();
+          const textLength = text.length;
+          const lineHint = Math.max(1, Math.ceil(textLength / 24));
+          let score = Math.min(220, Math.max(6, Math.sqrt(Math.max(1, textLength)) * 8 + lineHint * 2));
+          if (rowIndex === 0 || cell.tagName.toLowerCase() === 'th') {
+            score *= 0.75;
+          }
+          const perCol = score / span;
+          for (let index = 0; index < span && cursor + index < scores.length; index++) {
+            scores[cursor + index] += perCol;
+          }
+          cursor += span;
+        }
+      });
+
+      if (rows.length > 0) {
+        let cursor = 0;
+        for (const headerCell of Array.from(rows[0].children) as HTMLTableCellElement[]) {
+          const span = Math.max(1, Number(headerCell.colSpan || 1));
+          const title = String(headerCell.textContent || '').trim();
+          if (span === 1 && /(ID|序号|工时|耗时|时间)/i.test(title)) {
+            scores[cursor] = Math.min(scores[cursor], 10);
+          }
+          cursor += span;
+        }
+      }
+
+      const total = scores.reduce((sum, current) => sum + current, 0) || 1;
+      let widths = scores.map((score) => (score / total) * 100);
+      widths = widths.map((width) => Math.min(46, Math.max(8, width)));
+      const normalizedTotal = widths.reduce((sum, current) => sum + current, 0) || 1;
+      widths = widths.map((width) => (width / normalizedTotal) * 100);
+
+      table.querySelector('colgroup')?.remove();
+      const colgroup = doc.createElement('colgroup');
+      widths.forEach((width) => {
+        const col = doc.createElement('col');
+        col.setAttribute('style', `width:${width.toFixed(2)}%`);
+        colgroup.appendChild(col);
+      });
+      table.insertBefore(colgroup, table.firstChild);
+
+      const parent = table.parentElement;
+      if (!parent || !parent.classList.contains('plan-table-scroll')) {
+        const wrapper = doc.createElement('div');
+        wrapper.className = 'plan-table-scroll';
+        parent?.insertBefore(wrapper, table);
+        wrapper.appendChild(table);
+      }
+    });
+
+    return root.innerHTML;
+  } catch (err) {
+    return wrapPlanTablesForScroll(source);
+  }
+};
+
 export default function UnitDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -103,7 +188,7 @@ export default function UnitDetail() {
   }, [plan, planHistory]);
   const displayedPlan = planVersions[planViewIndex] || null;
   const displayedPlanContent = String(displayedPlan?.plan_content || '');
-  const renderedPlan = useMemo(() => wrapPlanTablesForScroll(renderMarkdownHtml(displayedPlanContent)), [displayedPlanContent]);
+  const renderedPlan = useMemo(() => optimizePlanTablesLayout(renderMarkdownHtml(displayedPlanContent)), [displayedPlanContent]);
   const renderedPretestQuestion = useMemo(() => marked.parse(pretestQuestion || ''), [pretestQuestion]);
 
   const loadPlanHistory = async (token: string) => {
@@ -693,9 +778,9 @@ export default function UnitDetail() {
                 [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
                 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
                 [&_.plan-table-scroll]:max-w-full [&_.plan-table-scroll]:overflow-x-auto [&_.plan-table-scroll]:pb-1 [&_.plan-table-scroll]:my-4
-                [&_.plan-table-scroll_table]:w-max [&_.plan-table-scroll_table]:min-w-[720px] [&_.plan-table-scroll_table]:max-w-[2400px] [&_.plan-table-scroll_table]:border-collapse [&_.plan-table-scroll_table]:my-0
+                [&_.plan-table-scroll_table]:table-fixed [&_.plan-table-scroll_table]:w-[clamp(920px,92vw,1400px)] [&_.plan-table-scroll_table]:border-collapse [&_.plan-table-scroll_table]:my-0
                 [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:whitespace-nowrap
-                [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:max-w-[20rem] [&_td]:whitespace-normal [&_td]:break-words"
+                [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:whitespace-normal [&_td]:break-words"
                 dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
               />
               <div className="mt-3 flex items-center justify-end gap-2 text-xs">
