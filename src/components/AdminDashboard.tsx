@@ -14,7 +14,7 @@ const unwrapOuterMarkdownFence = (text: string) => {
 
 const normalizeBareUrlBoundaries = (text: string) => {
   const source = String(text || '');
-  return source.replace(/https?:\/\/[^\s<>"'`]+/g, (matched, offset, fullText) => {
+  return source.replace(/https?:\/\/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+/g, (matched, offset, fullText) => {
     const start = Number(offset || 0);
     const prevChar = start > 0 ? fullText[start - 1] : '';
     const nextChar = fullText[start + matched.length] || '';
