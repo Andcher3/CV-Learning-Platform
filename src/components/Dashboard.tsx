@@ -16,6 +16,8 @@ export default function Dashboard() {
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackError, setFeedbackError] = useState('');
+  const [myFeedbacks, setMyFeedbacks] = useState<any[]>([]);
+  const [myFeedbacksLoading, setMyFeedbacksLoading] = useState(false);
   const [progressReminder, setProgressReminder] = useState<any>(null);
   const [showProgressReminder, setShowProgressReminder] = useState(false);
   const navigate = useNavigate();
@@ -36,6 +38,15 @@ export default function Dashboard() {
       .catch(console.error);
 
     if (user.role === 'student') {
+      setMyFeedbacksLoading(true);
+      fetch(`${API_BASE_URL}/api/feedback/mine`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => setMyFeedbacks(Array.isArray(data) ? data : []))
+        .catch(console.error)
+        .finally(() => setMyFeedbacksLoading(false));
+
       fetch(`${API_BASE_URL}/api/progress/reminder`, {
         headers: { Authorization: `Bearer ${token}` }
       })
@@ -138,6 +149,11 @@ export default function Dashboard() {
 
       setFeedbackMessage(data.message || '反馈提交成功');
       setFeedbackText('');
+      const listRes = await fetch(`${API_BASE_URL}/api/feedback/mine`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const listData = await listRes.json();
+      setMyFeedbacks(Array.isArray(listData) ? listData : []);
     } catch (err: any) {
       setFeedbackError(err.message || '提交失败');
     } finally {
@@ -213,6 +229,35 @@ export default function Dashboard() {
               </button>
             </div>
           </form>
+
+          <div className="mt-6 border-t border-slate-200 pt-4">
+            <h3 className="text-sm font-semibold text-slate-900 mb-2">我的反馈与管理员回复</h3>
+            {myFeedbacksLoading ? (
+              <div className="text-sm text-slate-500">加载中...</div>
+            ) : myFeedbacks.length === 0 ? (
+              <div className="text-sm text-slate-500">你还没有提交反馈。</div>
+            ) : (
+              <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                {myFeedbacks.map((item: any) => (
+                  <div key={item.id} className="rounded-lg border border-slate-200 p-3 bg-slate-50">
+                    <div className="text-xs text-slate-500">提交时间：{new Date(item.created_at).toLocaleString()}</div>
+                    <div className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{item.content}</div>
+                    {item.admin_reply ? (
+                      <div className="mt-2 rounded-md border border-emerald-100 bg-emerald-50 p-2">
+                        <div className="text-xs text-emerald-700 mb-1">
+                          管理员回复{item.replied_by_username ? `（${item.replied_by_username}）` : ''}
+                          {item.replied_at ? ` · ${new Date(item.replied_at).toLocaleString()}` : ''}
+                        </div>
+                        <div className="text-sm text-emerald-800 whitespace-pre-wrap">{item.admin_reply}</div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-xs text-slate-500">管理员暂未回复</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div

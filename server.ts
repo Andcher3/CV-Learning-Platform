@@ -194,6 +194,38 @@ async function startServer() {
     return path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(path.resolve(DATA_DIR), filePath);
   };
 
+  const extractIpynbText = (resolvedPath: string) => {
+    try {
+      const raw = fs.readFileSync(resolvedPath, 'utf-8');
+      const data = JSON.parse(raw);
+      const cells = Array.isArray(data?.cells) ? data.cells : [];
+      const lines: string[] = [];
+      for (let i = 0; i < cells.length; i++) {
+        const cell = cells[i] || {};
+        const cellType = String(cell?.cell_type || '');
+        const sourceArr = Array.isArray(cell?.source)
+          ? cell.source.map((item: any) => String(item))
+          : [String(cell?.source || '')];
+        const sourceText = sourceArr.join('').trim();
+        if (!sourceText) continue;
+        if (cellType === 'markdown') {
+          lines.push(`[Notebook Markdown Cell ${i + 1}]`);
+          lines.push(sourceText);
+        } else if (cellType === 'code') {
+          lines.push(`[Notebook Code Cell ${i + 1}]`);
+          lines.push(sourceText);
+        } else {
+          lines.push(`[Notebook Cell ${i + 1}]`);
+          lines.push(sourceText);
+        }
+        if (lines.join('\n').length >= MAX_FILE_PREVIEW) break;
+      }
+      return lines.join('\n').slice(0, MAX_FILE_PREVIEW);
+    } catch (err) {
+      return '';
+    }
+  };
+
   const buildPromptWithFiles = async (basePrompt: string, client?: any) => {
     const files = Array.from(basePrompt.matchAll(/FILES:\s*([^\n]+)/ig))
       .flatMap(match => match[1].split(',').map(f => f.trim()))
@@ -205,7 +237,7 @@ async function startServer() {
     const dataRoot = path.resolve(DATA_DIR);
     const uploadsRoot = path.resolve(uploadsDir);
     const notesRoot = path.resolve(NOTES_DIR);
-    const allowedTextExt = new Set(['.md', '.txt', '.json', '.csv', '.yaml', '.yml']);
+    const allowedTextExt = new Set(['.md', '.txt', '.json', '.csv', '.yaml', '.yml', '.ipynb']);
     const maxTextBytes = 512 * 1024; // inline text cap
     const maxBinaryBytes = 20 * 1024 * 1024;
 
@@ -217,6 +249,15 @@ async function startServer() {
 
       const ext = path.extname(resolved).toLowerCase();
       const stat = fs.statSync(resolved);
+
+      if (ext === '.ipynb' && stat.size <= maxTextBytes) {
+        const notebookText = extractIpynbText(resolved);
+        if (notebookText) {
+          fileBlocks.push(`[文件: ${resolved}][Jupyter Notebook 提取]\n${notebookText}`);
+          usedFiles.push(resolved);
+          continue;
+        }
+      }
 
       if (allowedTextExt.has(ext) && stat.size <= maxTextBytes) {
         const content = fs.readFileSync(resolved, 'utf-8').slice(0, MAX_FILE_PREVIEW);
@@ -659,12 +700,43 @@ async function startServer() {
 
   app.get('/api/admin/feedbacks', authenticate, requireAdmin, (req: any, res: any) => {
     const feedbacks = db.prepare(`
-      SELECT f.*, u.username AS student_username
+      SELECT f.*, u.username AS student_username, ru.username AS replied_by_username
       FROM feedbacks f
       JOIN users u ON f.student_id = u.id
+      LEFT JOIN users ru ON f.replied_by = ru.id
       ORDER BY f.created_at DESC
     `).all();
     res.json(feedbacks);
+  });
+
+  app.post('/api/admin/feedbacks/:id/reply', authenticate, requireAdmin, (req: any, res: any) => {
+    const feedbackId = Number(req.params.id);
+    const reply = String(req.body?.reply || '').trim();
+
+    if (!Number.isFinite(feedbackId) || feedbackId <= 0) {
+      return res.status(400).json({ error: '无效的反馈ID' });
+    }
+    if (!reply) {
+      return res.status(400).json({ error: '回复内容不能为空' });
+    }
+
+    const existing = db.prepare('SELECT id FROM feedbacks WHERE id = ?').get(feedbackId) as any;
+    if (!existing) {
+      return res.status(404).json({ error: '反馈不存在' });
+    }
+
+    db.prepare('UPDATE feedbacks SET admin_reply = ?, replied_by = ?, replied_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(reply, req.user.id, feedbackId);
+
+    const updated = db.prepare(`
+      SELECT f.*, u.username AS student_username, ru.username AS replied_by_username
+      FROM feedbacks f
+      JOIN users u ON f.student_id = u.id
+      LEFT JOIN users ru ON f.replied_by = ru.id
+      WHERE f.id = ?
+    `).get(feedbackId);
+
+    res.json({ message: '回复已保存', feedback: updated });
   });
 
   app.get('/api/admin/quizzes', authenticate, requireAdmin, (req: any, res: any) => {
@@ -1176,6 +1248,17 @@ async function startServer() {
 
     const result = db.prepare('INSERT INTO feedbacks (student_id, content) VALUES (?, ?)').run(req.user.id, text);
     res.json({ id: result.lastInsertRowid, message: '反馈提交成功' });
+  });
+
+  app.get('/api/feedback/mine', authenticate, (req: any, res: any) => {
+    const rows = db.prepare(`
+      SELECT f.*, ru.username AS replied_by_username
+      FROM feedbacks f
+      LEFT JOIN users ru ON f.replied_by = ru.id
+      WHERE f.student_id = ?
+      ORDER BY f.created_at DESC
+    `).all(req.user.id);
+    res.json(rows);
   });
 
   app.get('/api/progress/reminder', authenticate, async (req: any, res: any) => {

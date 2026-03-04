@@ -808,7 +808,7 @@ export default function UnitDetail() {
                   type="file"
                   id="note-file"
                   className="hidden"
-                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.ipynb"
                   ref={fileInputRef}
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
                 />

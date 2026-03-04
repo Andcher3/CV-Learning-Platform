@@ -680,6 +680,10 @@ function AdminFeedbacks() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [savingReplyId, setSavingReplyId] = useState<number | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
 
   const loadFeedbacks = async () => {
     setLoading(true);
@@ -688,7 +692,18 @@ function AdminFeedbacks() {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       const data = await res.json();
-      setFeedbacks(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setFeedbacks(list);
+      setReplyDrafts((prev) => {
+        const next = { ...prev };
+        for (const item of list) {
+          const key = String(item.id);
+          if (typeof next[key] !== 'string') {
+            next[key] = String(item.admin_reply || '');
+          }
+        }
+        return next;
+      });
     } finally {
       setLoading(false);
     }
@@ -697,6 +712,40 @@ function AdminFeedbacks() {
   useEffect(() => {
     loadFeedbacks();
   }, []);
+
+  const handleReply = async (feedbackId: number) => {
+    const reply = String(replyDrafts[String(feedbackId)] || '').trim();
+    if (!reply) {
+      setError('回复内容不能为空');
+      setMessage('');
+      return;
+    }
+
+    setSavingReplyId(feedbackId);
+    setError('');
+    setMessage('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/feedbacks/${feedbackId}/reply`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ reply })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '回复失败');
+      }
+      setFeedbacks((prev) => prev.map((item: any) => item.id === feedbackId ? data.feedback : item));
+      setReplyDrafts((prev) => ({ ...prev, [String(feedbackId)]: String(data?.feedback?.admin_reply || reply) }));
+      setMessage('回复已保存');
+    } catch (err: any) {
+      setError(err?.message || '回复失败');
+    } finally {
+      setSavingReplyId(null);
+    }
+  };
 
   const formatDate = (value?: string) => {
     if (!value) return '-';
@@ -709,10 +758,13 @@ function AdminFeedbacks() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">学生反馈</h2>
-          <p className="text-slate-500 mt-1">查看学生提交的平台改进建议。</p>
+          <p className="text-slate-500 mt-1">查看学生提交的平台改进建议，并可直接回复。</p>
         </div>
         <button onClick={loadFeedbacks} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">刷新</button>
       </div>
+
+      {error && <div className="bg-rose-50 text-rose-700 border border-rose-100 rounded-lg p-3 text-sm">{error}</div>}
+      {message && <div className="bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg p-3 text-sm">{message}</div>}
 
       {loading ? (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 text-slate-500">加载中...</div>
@@ -725,6 +777,7 @@ function AdminFeedbacks() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">提交时间</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">反馈内容</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">管理员回复</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
@@ -733,11 +786,37 @@ function AdminFeedbacks() {
                     <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{item.student_username}</td>
                     <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.created_at)}</td>
                     <td className="px-4 py-3 text-sm text-slate-700 whitespace-pre-wrap">{item.content}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700 min-w-[320px]">
+                      {item.admin_reply && (
+                        <div className="mb-2 rounded-lg border border-emerald-100 bg-emerald-50 p-2 text-emerald-800 whitespace-pre-wrap">
+                          {item.admin_reply}
+                          <div className="mt-1 text-xs text-emerald-700">
+                            {item.replied_by_username ? `回复人：${item.replied_by_username} · ` : ''}{formatDate(item.replied_at)}
+                          </div>
+                        </div>
+                      )}
+                      <textarea
+                        value={replyDrafts[String(item.id)] ?? ''}
+                        onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [String(item.id)]: e.target.value }))}
+                        rows={3}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                        placeholder="输入管理员回复内容..."
+                      />
+                      <div className="mt-2">
+                        <button
+                          onClick={() => handleReply(Number(item.id))}
+                          disabled={savingReplyId === Number(item.id)}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          {savingReplyId === Number(item.id) ? '保存中...' : '保存回复'}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {feedbacks.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-4 py-6 text-center text-slate-500">暂无学生反馈</td>
+                    <td colSpan={4} className="px-4 py-6 text-center text-slate-500">暂无学生反馈</td>
                   </tr>
                 )}
               </tbody>

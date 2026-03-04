@@ -70,8 +70,12 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     student_id INTEGER NOT NULL,
     content TEXT NOT NULL,
+    admin_reply TEXT,
+    replied_by INTEGER,
+    replied_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(student_id) REFERENCES users(id)
+    FOREIGN KEY(student_id) REFERENCES users(id),
+    FOREIGN KEY(replied_by) REFERENCES users(id)
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -209,6 +213,21 @@ try {
 }
 try {
   db.exec("ALTER TABLE quiz_assignments ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE feedbacks ADD COLUMN admin_reply TEXT");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE feedbacks ADD COLUMN replied_by INTEGER");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE feedbacks ADD COLUMN replied_at DATETIME");
 } catch (e) {
   // Column might already exist
 }
