@@ -2290,10 +2290,18 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static('dist'));
-    app.get('*', (req, res) => {
-      res.sendFile(path.resolve(process.cwd(), 'dist', 'index.html'));
-    });
+    const distDir = path.resolve(process.cwd(), 'dist');
+    const distIndexFile = path.join(distDir, 'index.html');
+    if (fs.existsSync(distIndexFile)) {
+      app.use(express.static(distDir));
+      app.get('*', (req, res) => {
+        res.sendFile(distIndexFile);
+      });
+    } else {
+      app.get('*', (req, res) => {
+        res.status(404).json({ error: 'Not found' });
+      });
+    }
   }
 
   app.listen(PORT, '0.0.0.0', () => {
