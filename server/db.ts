@@ -240,6 +240,125 @@ for (const s of defaultSettings) {
   fillEmptySetting.run(s.value, s.key);
 }
 
+const unitResourcePatches: Record<number, { objectives: string; resources: string }> = {
+  3: {
+    objectives: '掌握针孔相机模型、内参/外参与相机标定基本方法，能够运行标定代码并输出相机内参矩阵。',
+    resources: JSON.stringify([
+      { title: '鲁鹏计算机视觉：第6讲 相机模型（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第6讲 相机模型' },
+      { title: '鲁鹏计算机视觉：第7讲前半 相机标定（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第7讲 相机标定' },
+      { title: 'Programming Computer Vision with Python（第4章）', url: 'http://programmingcomputervision.com/', description: '运行相机标定代码并输出相机内参矩阵' },
+      { title: 'OpenCV 相机标定官方教程', url: 'https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html' },
+      { title: 'Computer Vision: Algorithms and Applications（第2章）', url: 'http://szeliski.org/Book/' }
+    ])
+  },
+  4: {
+    objectives: '系统掌握多层感知机、反向传播与卷积神经网络核心机制，能够完成基础神经网络训练与验证。',
+    resources: JSON.stringify([
+      { title: 'D2L：多层感知机', url: 'https://zh.d2l.ai/chapter_multilayer-perceptrons/index.html' },
+      { title: 'D2L：卷积神经网络', url: 'https://zh.d2l.ai/chapter_convolutional-neural-networks/index.html' },
+      { title: 'MLP 讲解视频（B站）', url: 'https://www.bilibili.com/video/BV1L64y1m7Nh/' },
+      { title: '反向传播讲解视频（B站）', url: 'https://www.bilibili.com/video/BV1Th411U7UN/' },
+      { title: '卷积神经网络讲解视频（B站）', url: 'https://www.bilibili.com/video/BV1MB4y1F7of/' },
+      { title: '卷积层原理补充（B站）', url: 'https://www.bilibili.com/video/BV1EV411j7nX/' },
+      { title: 'CNN 实战示例（B站）', url: 'https://www.bilibili.com/video/BV1t44y1r7ct/' },
+      { title: '训练技巧补充（B站）', url: 'https://www.bilibili.com/video/BV1hh411U7gn/' }
+    ])
+  },
+  5: {
+    objectives: '掌握自注意力与多头注意力机制，理解 Transformer/ViT 关键结构并完成基础视觉分类实践。',
+    resources: JSON.stringify([
+      { title: '李宏毅课程主页（2021）', url: 'https://speech.ee.ntu.edu.tw/~hylee/ml/2021-spring.php' },
+      { title: 'The Illustrated Transformer', url: 'https://jalammar.github.io/illustrated-transformer/' },
+      { title: 'Transformer 原始论文', url: 'https://arxiv.org/abs/1706.03762' },
+      { title: 'BERT 论文', url: 'https://arxiv.org/abs/1810.04805' },
+      { title: 'ViT 论文', url: 'https://arxiv.org/abs/2010.11929' },
+      { title: 'DeiT 论文', url: 'https://arxiv.org/abs/2012.12877', description: '如访问异常可检索 DeiT arXiv' },
+      { title: 'Swin Transformer 论文', url: 'https://arxiv.org/abs/2103.14030', description: '如访问异常可检索 Swin Transformer arXiv' },
+      { title: 'Transformer-XL 论文', url: 'https://arxiv.org/abs/1901.02860', description: '如访问异常可检索 Transformer-XL arXiv' },
+      { title: 'HuggingFace Transformers 文档', url: 'https://huggingface.co/docs/transformers/index' },
+      { title: 'HuggingFace Transformers 仓库', url: 'https://github.com/huggingface/transformers' },
+      { title: 'ViT PyTorch 实现', url: 'https://github.com/lucidrains/vit-pytorch' },
+      { title: 'Transformer-XL 代码', url: 'https://github.com/kimiyoung/transformer-xl' },
+      { title: 'Transformer 讲解视频（B站）', url: 'https://www.bilibili.com/video/BV1AF411b7xQ' },
+      { title: 'ViT 讲解视频（B站）', url: 'https://www.bilibili.com/video/BV13L4y1475U' },
+      { title: 'Transformer 实战视频（B站）', url: 'https://www.bilibili.com/video/BV15P4y137jb' },
+      { title: '注意力机制补充（B站）', url: 'https://www.bilibili.com/video/BV1PL411M7eQ' },
+      { title: 'Transformer 细节补充（B站）', url: 'https://www.bilibili.com/video/BV1bK411e7fd' },
+      { title: 'ViT 实验演示（B站）', url: 'https://www.bilibili.com/video/BV1pu411o7BE/' }
+    ])
+  },
+  6: {
+    objectives: '理解目标检测中的边界框、锚框、NMS与SSD框架，能够完成基础检测推理与可视化。',
+    resources: JSON.stringify([
+      { title: 'D2L：边界框', url: 'https://zh.d2l.ai/chapter_computer-vision/bounding-box.html' },
+      { title: 'D2L：锚框', url: 'https://zh.d2l.ai/chapter_computer-vision/anchor.html' },
+      { title: 'D2L：多尺度目标检测', url: 'https://zh.d2l.ai/chapter_computer-vision/multiscale-object-detection.html' },
+      { title: 'D2L：SSD', url: 'https://zh.d2l.ai/chapter_computer-vision/ssd.html' },
+      { title: 'SSD 原始实现（Caffe）', url: 'https://github.com/weiliu89/caffe/tree/ssd' },
+      { title: 'NMS 原理详解', url: 'https://zhuanlan.zhihu.com/p/5119830621' },
+      { title: '目标检测基础视频（B站）', url: 'https://www.bilibili.com/video/BV1Db4y1C71g' },
+      { title: '锚框与回归视频（B站）', url: 'https://www.bilibili.com/video/BV1Lh411Y7LX' },
+      { title: 'SSD 讲解视频（B站）', url: 'https://www.bilibili.com/video/BV1ZX4y1c7Sw' },
+      { title: '检测实战视频（B站）', url: 'https://www.bilibili.com/video/BV1aB4y1K7za' },
+      { title: 'NMS 细节视频（B站）', url: 'https://www.bilibili.com/video/BV1fT4y1L7Gi' }
+    ])
+  },
+  7: {
+    objectives: '理解 DETR 与匈牙利匹配的核心思想，能够使用 DETR 模型对图片进行端到端目标检测并可视化结果。',
+    resources: JSON.stringify([
+      { title: 'DETR 论文', url: 'https://arxiv.org/pdf/2005.12872' },
+      { title: 'DETR 官方代码', url: 'https://github.com/facebookresearch/detr' },
+      { title: 'HuggingFace DETR 文档', url: 'https://huggingface.co/docs/transformers/model_doc/detr' },
+      { title: 'DETR 讲解视频（B站）', url: 'https://www.bilibili.com/video/BV1GB4y1X72R' },
+      { title: 'DETR 实战视频（B站）', url: 'https://www.bilibili.com/video/BV1w61kY1EVo' }
+    ])
+  },
+  8: {
+    objectives: '系统掌握语义分割基础、转置卷积与FCN关键原理，能够复现语义分割模型并完成训练优化实践。',
+    resources: JSON.stringify([
+      { title: '语义分割综述论文', url: 'https://arxiv.org/abs/2001.05566' },
+      { title: '图像分割基础讲解视频', url: 'https://www.bilibili.com/video/BV1BK4y1M7Rd/' },
+      { title: '转置卷积详解（A guide to convolution arithmetic）', url: 'https://arxiv.org/abs/1603.07285' },
+      { title: '转置卷积动画演示', url: 'https://github.com/vdumoulin/conv_arithmetic' },
+      { title: 'FCN 原始论文', url: 'https://arxiv.org/abs/1411.4038' },
+      { title: 'FCN 代码解读视频', url: 'https://www.bilibili.com/video/BV1Jh411Y7WQ/?vd_source=70900f2568559f2a6ea1e31fedb1175b' },
+      { title: 'FCN 官方代码', url: 'https://github.com/shelhamer/fcn.berkeleyvision.org' },
+      { title: 'PyTorch 语义分割实战教程', url: 'https://github.com/CSAILVision/semantic-segmentation-pytorch' }
+    ])
+  },
+  9: {
+    objectives: '理解 GAN 与 VAE 核心机制，掌握典型生成模型训练思路并能运行/对比主流生成模型实现。',
+    resources: JSON.stringify([
+      { title: 'GAN 原始论文', url: 'https://arxiv.org/abs/1406.2661' },
+      { title: 'VAE 论文（Auto-Encoding Variational Bayes）', url: 'https://arxiv.org/abs/1312.6114' },
+      { title: 'WGAN 论文', url: 'https://arxiv.org/abs/1701.07875' },
+      { title: 'Progressive GAN 论文', url: 'https://arxiv.org/abs/1711.00937' },
+      { title: 'StyleGAN 论文', url: 'https://arxiv.org/abs/1812.04948', description: '如访问异常可检索 StyleGAN arXiv' },
+      { title: 'StyleGAN2 论文', url: 'https://arxiv.org/abs/1912.04958', description: '如访问异常可检索 StyleGAN2 arXiv' },
+      { title: 'VQ-VAE 论文', url: 'https://arxiv.org/abs/1711.00937', description: '可结合文档中的VAE扩展阅读' },
+      { title: 'GAN Hacks', url: 'https://github.com/soumith/ganhacks' },
+      { title: 'PyTorch GAN Zoo', url: 'https://github.com/facebookresearch/pytorch_GAN_zoo' },
+      { title: 'CycleGAN/Pix2Pix', url: 'https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix' },
+      { title: 'VAE 代码示例', url: 'https://github.com/altosaar/vae' }
+    ])
+  },
+  10: {
+    objectives: '掌握神经风格迁移核心理论与实现方法，能够完成风格迁移复现并了解快速迁移与域迁移扩展。',
+    resources: JSON.stringify([
+      { title: 'Neural Style 论文', url: 'https://arxiv.org/abs/1508.06576' },
+      { title: 'Instance Normalization 论文', url: 'https://arxiv.org/abs/1607.08022', description: '如访问异常可检索 Instance Normalization arXiv' },
+      { title: 'AdaIN 论文', url: 'https://arxiv.org/abs/1703.06868' },
+      { title: 'WCT 风格迁移论文', url: 'https://arxiv.org/abs/1705.08086', description: '如访问异常可检索 Universal Style Transfer arXiv' },
+      { title: 'Fast Style Transfer 论文', url: 'https://arxiv.org/abs/1603.08155' },
+      { title: 'CycleGAN 论文', url: 'https://arxiv.org/abs/1703.10593' },
+      { title: '风格迁移综述', url: 'https://arxiv.org/abs/2001.08128' },
+      { title: 'Fast Style Transfer 代码', url: 'https://github.com/lengstrom/fast-style-transfer' },
+      { title: 'AdaIN 代码', url: 'https://github.com/xunhuang1995/AdaIN-style' },
+      { title: 'CycleGAN 代码', url: 'https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix' }
+    ])
+  }
+};
+
 const unitsCount = db.prepare('SELECT COUNT(*) as count FROM units').get() as { count: number };
 if (unitsCount.count === 0) {
   const units = [
@@ -274,93 +393,57 @@ if (unitsCount.count === 0) {
       title: '相机模型',
       week_range: '4-5',
       description: '针孔相机模型、相机校准基础',
-      objectives: '掌握针孔相机模型、内参/外参与相机标定基本方法，能够运行标定代码并输出相机内参矩阵。',
-      resources: JSON.stringify([
-        { title: '鲁鹏计算机视觉：第6讲 相机模型（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第6讲 相机模型' },
-        { title: '鲁鹏计算机视觉：第7讲前半 相机标定（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第7讲 相机标定' },
-        { title: 'Programming Computer Vision with Python（第4章）', url: 'http://programmingcomputervision.com/', description: '运行相机标定代码并输出相机内参矩阵' },
-        { title: 'OpenCV 相机标定官方教程', url: 'https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html' },
-        { title: 'Computer Vision: Algorithms and Applications（第2章）', url: 'http://szeliski.org/Book/' }
-      ])
+      objectives: unitResourcePatches[3].objectives,
+      resources: unitResourcePatches[3].resources
     },
     {
       title: '深度学习基础',
       week_range: '5-6',
       description: '多层感知机，卷积神经网络',
-      objectives: '理解反向传播与卷积神经网络核心机制，能够完成两层神经网络前向/反向传播基础实现。',
-      resources: JSON.stringify([
-        { title: 'CS231n Lecture 4：Backpropagation', url: 'https://cs231n.github.io/optimization-2/' },
-        { title: 'CS231n Lecture 5：Convolutional Neural Networks', url: 'https://cs231n.github.io/convolutional-networks/' },
-        { title: 'CS231n Assignment 1（官方）', url: 'https://github.com/cs231n/cs231n.github.io/tree/master/assignments' },
-        { title: 'Deep Learning（花书）', url: 'https://www.deeplearningbook.org/', description: '建议阅读第6章与第9章' }
-      ])
+      objectives: unitResourcePatches[4].objectives,
+      resources: unitResourcePatches[4].resources
     },
     {
       title: 'Transformer',
       week_range: '7',
       description: '注意力机制, 网络基础, 编程实践',
-      objectives: '掌握自注意力与多头注意力机制，能够调用 ViT 模型完成图片分类并记录预测类别与置信度。',
-      resources: JSON.stringify([
-        { title: '李宏毅深度学习课程：Self-Attention and Transformer', url: 'https://speech.ee.ntu.edu.tw/~hylee/index.html', description: '可在 B站 搜索同名视频' },
-        { title: 'HuggingFace 图像分类任务文档', url: 'https://huggingface.co/docs/transformers/tasks/image_classification' },
-        { title: 'Vision Transformer 论文', url: 'https://arxiv.org/abs/2010.11929' }
-      ])
+      objectives: unitResourcePatches[5].objectives,
+      resources: unitResourcePatches[5].resources
     },
     {
       title: '目标检测基础',
       week_range: '8',
       description: '检测基础、SSD检测模型',
-      objectives: '理解目标检测中的 Anchor 与 NMS 等基础概念，能够使用 torchvision 的 SSD 预训练模型完成推理与可视化。',
-      resources: JSON.stringify([
-        { title: 'CS231n 目标检测笔记', url: 'https://cs231n.github.io/detection/' },
-        { title: 'torchvision 模型库（目标检测）', url: 'https://pytorch.org/vision/stable/models.html#object-detection' },
-        { title: 'PyTorch torchvision 检测实战教程', url: 'https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html' },
-        { title: 'YOLOv5（可选）', url: 'https://github.com/ultralytics/yolov5' }
-      ])
+      objectives: unitResourcePatches[6].objectives,
+      resources: unitResourcePatches[6].resources
     },
     {
       title: '目标检测进阶',
       week_range: '9',
       description: 'DETR 检测模型',
-      objectives: '理解 DETR 与匈牙利匹配的核心思想，能够使用 DETR 模型对图片进行端到端目标检测并可视化结果。',
-      resources: JSON.stringify([
-        { title: '李沐论文精讲：DETR（B站检索）', url: '', description: '关键词：李沐 论文精读 DETR' },
-        { title: 'HuggingFace DETR 文档', url: 'https://huggingface.co/docs/transformers/model_doc/detr' },
-        { title: 'DETR 论文', url: 'https://arxiv.org/abs/2005.12872' }
-      ])
+      objectives: unitResourcePatches[7].objectives,
+      resources: unitResourcePatches[7].resources
     },
     {
       title: '语义分割',
       week_range: '10',
       description: '分割基础、转置卷积、全卷积',
-      objectives: '掌握 FCN、转置卷积与 DeepLab 等语义分割关键概念，能够完成 DeepLabV3 推理并输出可视化分割结果。',
-      resources: JSON.stringify([
-        { title: 'CS231n 语义分割笔记', url: 'https://cs231n.github.io/semantic-segmentation/' },
-        { title: 'D2L：转置卷积', url: 'https://zh.d2l.ai/chapter_computer-vision/transposed-conv.html' },
-        { title: 'torchvision DeepLabV3 文档', url: 'https://pytorch.org/vision/stable/models/generated/torchvision.models.segmentation.deeplabv3_resnet50.html' }
-      ])
+      objectives: unitResourcePatches[8].objectives,
+      resources: unitResourcePatches[8].resources
     },
     {
       title: '生成模型',
       week_range: '11',
       description: 'GAN, VAE',
-      objectives: '理解 GAN 的生成器/判别器对抗训练思路，能够运行 PyTorch DCGAN 教程并生成图像结果。',
-      resources: JSON.stringify([
-        { title: 'CS231n 生成模型笔记（含GAN）', url: 'https://cs231n.github.io/generative-models/' },
-        { title: 'PyTorch DCGAN 官方教程', url: 'https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html' },
-        { title: 'GAN 原始论文', url: 'https://arxiv.org/abs/1406.2661' }
-      ])
+      objectives: unitResourcePatches[9].objectives,
+      resources: unitResourcePatches[9].resources
     },
     {
       title: '风格迁移',
       week_range: '12',
       description: '概念、模型结构、学习方法',
-      objectives: '掌握内容损失、风格损失与格拉姆矩阵等核心概念，能够运行神经风格迁移并保存融合结果图。',
-      resources: JSON.stringify([
-        { title: 'CS231n 神经风格迁移笔记', url: 'https://cs231n.github.io/neural-style-transfer/' },
-        { title: 'PyTorch Neural Style Transfer 教程', url: 'https://pytorch.org/tutorials/advanced/neural_style_tutorial.html' },
-        { title: 'CycleGAN（可选进阶）', url: 'https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix' }
-      ])
+      objectives: unitResourcePatches[10].objectives,
+      resources: unitResourcePatches[10].resources
     },
   ];
   const insertUnit = db.prepare('INSERT INTO units (title, week_range, description, objectives, resources) VALUES (?, ?, ?, ?, ?)');
@@ -400,89 +483,31 @@ if (unitsCount.count === 0) {
     );
   }
 
-  const unitBackfillPatches = [
-    {
-      id: 3,
-      objectives: '掌握针孔相机模型、内参/外参与相机标定基本方法，能够运行标定代码并输出相机内参矩阵。',
-      resources: JSON.stringify([
-        { title: '鲁鹏计算机视觉：第6讲 相机模型（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第6讲 相机模型' },
-        { title: '鲁鹏计算机视觉：第7讲前半 相机标定（B站检索）', url: '', description: '关键词：北京邮电大学 计算机视觉 鲁鹏 第7讲 相机标定' },
-        { title: 'Programming Computer Vision with Python（第4章）', url: 'http://programmingcomputervision.com/', description: '运行相机标定代码并输出相机内参矩阵' },
-        { title: 'OpenCV 相机标定官方教程', url: 'https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html' },
-        { title: 'Computer Vision: Algorithms and Applications（第2章）', url: 'http://szeliski.org/Book/' }
-      ])
-    },
-    {
-      id: 4,
-      objectives: '理解反向传播与卷积神经网络核心机制，能够完成两层神经网络前向/反向传播基础实现。',
-      resources: JSON.stringify([
-        { title: 'CS231n Lecture 4：Backpropagation', url: 'https://cs231n.github.io/optimization-2/' },
-        { title: 'CS231n Lecture 5：Convolutional Neural Networks', url: 'https://cs231n.github.io/convolutional-networks/' },
-        { title: 'CS231n Assignment 1（官方）', url: 'https://github.com/cs231n/cs231n.github.io/tree/master/assignments' },
-        { title: 'Deep Learning（花书）', url: 'https://www.deeplearningbook.org/', description: '建议阅读第6章与第9章' }
-      ])
-    },
-    {
-      id: 5,
-      objectives: '掌握自注意力与多头注意力机制，能够调用 ViT 模型完成图片分类并记录预测类别与置信度。',
-      resources: JSON.stringify([
-        { title: '李宏毅深度学习课程：Self-Attention and Transformer', url: 'https://speech.ee.ntu.edu.tw/~hylee/index.html', description: '可在 B站 搜索同名视频' },
-        { title: 'HuggingFace 图像分类任务文档', url: 'https://huggingface.co/docs/transformers/tasks/image_classification' },
-        { title: 'Vision Transformer 论文', url: 'https://arxiv.org/abs/2010.11929' }
-      ])
-    },
-    {
-      id: 6,
-      objectives: '理解目标检测中的 Anchor 与 NMS 等基础概念，能够使用 torchvision 的 SSD 预训练模型完成推理与可视化。',
-      resources: JSON.stringify([
-        { title: 'CS231n 目标检测笔记', url: 'https://cs231n.github.io/detection/' },
-        { title: 'torchvision 模型库（目标检测）', url: 'https://pytorch.org/vision/stable/models.html#object-detection' },
-        { title: 'PyTorch torchvision 检测实战教程', url: 'https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html' },
-        { title: 'YOLOv5（可选）', url: 'https://github.com/ultralytics/yolov5' }
-      ])
-    },
-    {
-      id: 7,
-      objectives: '理解 DETR 与匈牙利匹配的核心思想，能够使用 DETR 模型对图片进行端到端目标检测并可视化结果。',
-      resources: JSON.stringify([
-        { title: '李沐论文精讲：DETR（B站检索）', url: '', description: '关键词：李沐 论文精读 DETR' },
-        { title: 'HuggingFace DETR 文档', url: 'https://huggingface.co/docs/transformers/model_doc/detr' },
-        { title: 'DETR 论文', url: 'https://arxiv.org/abs/2005.12872' }
-      ])
-    },
-    {
-      id: 8,
-      objectives: '掌握 FCN、转置卷积与 DeepLab 等语义分割关键概念，能够完成 DeepLabV3 推理并输出可视化分割结果。',
-      resources: JSON.stringify([
-        { title: 'CS231n 语义分割笔记', url: 'https://cs231n.github.io/semantic-segmentation/' },
-        { title: 'D2L：转置卷积', url: 'https://zh.d2l.ai/chapter_computer-vision/transposed-conv.html' },
-        { title: 'torchvision DeepLabV3 文档', url: 'https://pytorch.org/vision/stable/models/generated/torchvision.models.segmentation.deeplabv3_resnet50.html' }
-      ])
-    },
-    {
-      id: 9,
-      objectives: '理解 GAN 的生成器/判别器对抗训练思路，能够运行 PyTorch DCGAN 教程并生成图像结果。',
-      resources: JSON.stringify([
-        { title: 'CS231n 生成模型笔记（含GAN）', url: 'https://cs231n.github.io/generative-models/' },
-        { title: 'PyTorch DCGAN 官方教程', url: 'https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html' },
-        { title: 'GAN 原始论文', url: 'https://arxiv.org/abs/1406.2661' }
-      ])
-    },
-    {
-      id: 10,
-      objectives: '掌握内容损失、风格损失与格拉姆矩阵等核心概念，能够运行神经风格迁移并保存融合结果图。',
-      resources: JSON.stringify([
-        { title: 'CS231n 神经风格迁移笔记', url: 'https://cs231n.github.io/neural-style-transfer/' },
-        { title: 'PyTorch Neural Style Transfer 教程', url: 'https://pytorch.org/tutorials/advanced/neural_style_tutorial.html' },
-        { title: 'CycleGAN（可选进阶）', url: 'https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix' }
-      ])
-    }
-  ];
+  const unitBackfillPatches = Object.entries(unitResourcePatches).map(([id, payload]) => ({
+    id: Number(id),
+    objectives: payload.objectives,
+    resources: payload.resources
+  }));
 
   const patchUnit = db.prepare('UPDATE units SET objectives = ?, resources = ? WHERE id = ?');
   for (const patch of unitBackfillPatches) {
     const current = db.prepare('SELECT resources FROM units WHERE id = ?').get(patch.id) as any;
-    if (current && (!current.resources || current.resources === '[]')) {
+    let currentCount = 0;
+    let targetCount = 0;
+    try {
+      const parsedCurrent = JSON.parse(String(current?.resources || '[]'));
+      currentCount = Array.isArray(parsedCurrent) ? parsedCurrent.length : 0;
+    } catch (err) {
+      currentCount = 0;
+    }
+    try {
+      const parsedTarget = JSON.parse(patch.resources);
+      targetCount = Array.isArray(parsedTarget) ? parsedTarget.length : 0;
+    } catch (err) {
+      targetCount = 0;
+    }
+
+    if (current && (currentCount === 0 || currentCount < targetCount)) {
       patchUnit.run(patch.objectives, patch.resources, patch.id);
     }
   }
