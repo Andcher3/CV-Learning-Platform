@@ -74,6 +74,10 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage: storage });
+const notesUpload = upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'files', maxCount: 20 }
+]);
 
 async function startServer() {
   const app = express();
@@ -192,6 +196,37 @@ async function startServer() {
     if (filePath.startsWith('/notes/')) return path.join(NOTES_DIR, path.basename(filePath));
     if (filePath.startsWith('/uploads/')) return path.join(uploadsDir, path.basename(filePath));
     return path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(path.resolve(DATA_DIR), filePath);
+  };
+
+  const parseNoteFileUrls = (note: any): string[] => {
+    const urlsFromJson = (() => {
+      try {
+        const parsed = JSON.parse(String(note?.file_urls || '[]'));
+        return Array.isArray(parsed) ? parsed.map((item: any) => String(item || '').trim()).filter(Boolean) : [];
+      } catch (err) {
+        return [];
+      }
+    })();
+    if (urlsFromJson.length > 0) return urlsFromJson;
+    const single = String(note?.file_url || '').trim();
+    return single ? [single] : [];
+  };
+
+  const withNoteFileUrls = (note: any) => {
+    if (!note || typeof note !== 'object') return note;
+    return { ...note, file_urls: parseNoteFileUrls(note) };
+  };
+
+  const resolveAttachmentPathsFromUrls = (fileUrls: string[]) => {
+    return fileUrls
+      .map((url) => {
+        const normalized = String(url || '').trim();
+        if (!normalized) return null;
+        if (normalized.startsWith('/notes/')) return path.join(NOTES_DIR, path.basename(normalized));
+        if (normalized.startsWith('/uploads/')) return path.join(uploadsDir, path.basename(normalized));
+        return null;
+      })
+      .filter(Boolean) as string[];
   };
 
   const extractIpynbText = (resolvedPath: string) => {
@@ -684,7 +719,7 @@ async function startServer() {
       JOIN units un ON n.unit_id = un.id
       ORDER BY n.created_at DESC
     `).all();
-    res.json(notes);
+    res.json((notes as any[]).map(withNoteFileUrls));
   });
 
   app.get('/api/admin/plans', authenticate, requireAdmin, (req: any, res: any) => {
@@ -1649,10 +1684,10 @@ async function startServer() {
   // Notes
   app.get('/api/notes/:unitId', authenticate, (req: any, res: any) => {
     const notes = db.prepare('SELECT * FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC').all(req.user.id, req.params.unitId);
-    res.json(notes);
+    res.json((notes as any[]).map(withNoteFileUrls));
   });
 
-  app.post('/api/notes', authenticate, upload.single('file'), async (req: any, res: any) => {
+  app.post('/api/notes', authenticate, notesUpload, async (req: any, res: any) => {
     const { unitId, week, content } = req.body;
     const wantsStream = String(req.query?.stream || '') === '1' || String(req.headers.accept || '').includes('text/event-stream');
     let heartbeatTimer: NodeJS.Timeout | null = null;
@@ -1735,22 +1770,38 @@ async function startServer() {
     const noteContentForFile = (content || '').trim() || '（本次仅提交了附件，未填写文字内容）';
     fs.writeFileSync(noteContentPath, noteContentForFile, 'utf-8');
 
-    let fileUrl = null;
-    if (req.file) {
-      const originalExt = path.extname(req.file.originalname || '').toLowerCase();
+    const uploadedByField = (req.files || {}) as Record<string, Express.Multer.File[]>;
+    const uploadedFiles = [
+      ...(uploadedByField.files || []),
+      ...(uploadedByField.file || [])
+    ];
+
+    const fileUrls: string[] = [];
+    for (let index = 0; index < uploadedFiles.length; index++) {
+      const currentFile = uploadedFiles[index];
+      const originalExt = path.extname(currentFile.originalname || '').toLowerCase();
       const ext = originalExt || '.bin';
-      const filename = `note-s${req.user.id}-u${unitId}-n${noteVersion}-file${ext}`;
-      const fromPath = req.file.path;
+      const suffix = uploadedFiles.length > 1 ? `-${index + 1}` : '';
+      const filename = `note-s${req.user.id}-u${unitId}-n${noteVersion}-file${suffix}${ext}`;
+      const fromPath = currentFile.path;
       const toPath = path.join(NOTES_DIR, filename);
       fs.renameSync(fromPath, toPath);
-      fileUrl = `/notes/${filename}`;
+      fileUrls.push(`/notes/${filename}`);
     }
+    const fileUrl = fileUrls[0] || null;
 
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
     if (!unit) return respondError(404, 'Unit not found');
 
     // Save note
-    const result = db.prepare('INSERT INTO notes (student_id, unit_id, week, content, file_url) VALUES (?, ?, ?, ?, ?)').run(req.user.id, unitId, week, content || '', fileUrl);
+    const result = db.prepare('INSERT INTO notes (student_id, unit_id, week, content, file_url, file_urls) VALUES (?, ?, ?, ?, ?, ?)').run(
+      req.user.id,
+      unitId,
+      week,
+      content || '',
+      fileUrl,
+      JSON.stringify(fileUrls)
+    );
     const noteId = result.lastInsertRowid;
 
     let adjustApplied = false;
@@ -1788,13 +1839,11 @@ async function startServer() {
             `单元周次范围: 第${unit.week_range}周`
           ].join('\n');
 
-          const baseAdjustPrompt = prompts.adjustPlan(unit, plan, content, fileUrl, progressContext);
-          const noteAttachmentPath = fileUrl && String(fileUrl).startsWith('/notes/')
-            ? path.join(NOTES_DIR, path.basename(String(fileUrl)))
-            : fileUrl && String(fileUrl).startsWith('/uploads/')
-              ? path.join(uploadsDir, path.basename(String(fileUrl)))
-              : null;
-          const adjustPromptWithFile = noteAttachmentPath ? `${baseAdjustPrompt}\nFILES: ${noteAttachmentPath}` : baseAdjustPrompt;
+          const baseAdjustPrompt = prompts.adjustPlan(unit, plan, content, fileUrls, progressContext);
+          const noteAttachmentPaths = resolveAttachmentPathsFromUrls(fileUrls);
+          const adjustPromptWithFile = noteAttachmentPaths.length > 0
+            ? `${baseAdjustPrompt}\nFILES: ${noteAttachmentPaths.join(', ')}`
+            : baseAdjustPrompt;
           const { prompt: adjustPrompt } = await buildPromptWithFiles(adjustPromptWithFile, client);
 
           let newPlanContent = plan.plan_content;
@@ -1957,13 +2006,13 @@ async function startServer() {
 
     try {
       const { client, model } = getAiClient();
-      const basePrompt = prompts.gradeUnit(unit, plan, latestNote);
-      const noteAttachmentPath = latestNote.file_url && String(latestNote.file_url).startsWith('/notes/')
-        ? path.join(NOTES_DIR, path.basename(String(latestNote.file_url)))
-        : latestNote.file_url && String(latestNote.file_url).startsWith('/uploads/')
-          ? path.join(uploadsDir, path.basename(String(latestNote.file_url)))
-          : null;
-      const promptWithNoteFile = noteAttachmentPath ? `${basePrompt}\nFILES: ${noteAttachmentPath}` : basePrompt;
+      const normalizedLatestNote = withNoteFileUrls(latestNote);
+      const noteFileUrls = parseNoteFileUrls(normalizedLatestNote);
+      const basePrompt = prompts.gradeUnit(unit, plan, normalizedLatestNote);
+      const noteAttachmentPaths = resolveAttachmentPathsFromUrls(noteFileUrls);
+      const promptWithNoteFile = noteAttachmentPaths.length > 0
+        ? `${basePrompt}\nFILES: ${noteAttachmentPaths.join(', ')}`
+        : basePrompt;
       const promptBuildStartedAt = Date.now();
       const { prompt, files } = await buildPromptWithFiles(promptWithNoteFile, client);
       promptBuildMs = Date.now() - promptBuildStartedAt;
@@ -2200,9 +2249,10 @@ async function startServer() {
       let latestPlanContext = '';
       let currentUnitContext = '';
       if (unitId) {
-        const latestNote = db.prepare('SELECT content, file_url, created_at FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any;
+        const latestNote = db.prepare('SELECT content, file_url, file_urls, created_at FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any;
         if (latestNote) {
-          latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n提交时间：${latestNote.created_at || '未知'}\n笔记内容：${latestNote.content || '无'}\n是否有附件：${latestNote.file_url ? `是（${latestNote.file_url}）` : '否'}\n`;
+          const noteFileUrls = parseNoteFileUrls(latestNote);
+          latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n提交时间：${latestNote.created_at || '未知'}\n笔记内容：${latestNote.content || '无'}\n是否有附件：${noteFileUrls.length > 0 ? `是（共${noteFileUrls.length}份：${noteFileUrls.join('、')}）` : '否'}\n`;
         } else {
           latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n当前无笔记记录。\n`;
         }
@@ -2223,14 +2273,12 @@ async function startServer() {
       }
 
       const mergedContext = `${context || ''}${currentUnitContext}${latestPlanContext}${latestNoteContext}`;
-      const latestAttachment = unitId
-        ? (db.prepare('SELECT file_url FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any)?.file_url
+      const latestAttachmentNote = unitId
+        ? db.prepare('SELECT file_url, file_urls FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any
         : null;
-      const latestAttachmentFile = latestAttachment && String(latestAttachment).startsWith('/notes/')
-        ? path.join(NOTES_DIR, path.basename(String(latestAttachment)))
-        : latestAttachment && String(latestAttachment).startsWith('/uploads/')
-          ? path.join(uploadsDir, path.basename(String(latestAttachment)))
-          : null;
+      const latestAttachmentFiles = latestAttachmentNote
+        ? resolveAttachmentPathsFromUrls(parseNoteFileUrls(latestAttachmentNote))
+        : [];
       const outlinePathCandidates = unitId
         ? [
             path.join(DATA_DIR, `admin/plan_unit/unit${unitId}/计算机视觉大纲_${unitId}.md`),
@@ -2241,7 +2289,7 @@ async function startServer() {
         : [];
       const outlinePath = outlinePathCandidates.find(candidate => fs.existsSync(candidate)) || null;
       const basePrompt = prompts.qaAssistant(mergedContext, question);
-      const filesForPrompt = [latestAttachmentFile, outlinePath].filter(Boolean) as string[];
+      const filesForPrompt = [...latestAttachmentFiles, outlinePath].filter(Boolean) as string[];
       const promptWithAttachment = filesForPrompt.length > 0 ? `${basePrompt}\nFILES: ${filesForPrompt.join(', ')}` : basePrompt;
       sendSse('stage', { message: '正在读取附件并生成回答...' });
       const { prompt, files } = await buildPromptWithFiles(promptWithAttachment, client);

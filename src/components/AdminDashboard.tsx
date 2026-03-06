@@ -327,6 +327,14 @@ function AdminRecords() {
     return `${API_BASE_URL}${fileUrl}`;
   };
 
+  const getNoteAttachmentUrls = (note: any): string[] => {
+    if (Array.isArray(note?.file_urls) && note.file_urls.length > 0) {
+      return note.file_urls.map((item: any) => String(item || '').trim()).filter(Boolean);
+    }
+    const single = String(note?.file_url || '').trim();
+    return single ? [single] : [];
+  };
+
   const loadData = () => {
     setLoading(true);
     Promise.all([
@@ -594,8 +602,14 @@ function AdminRecords() {
                       <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(note.created_at)}</td>
                       <td className="px-4 py-3 text-sm text-slate-600">{note.grade ?? '-'}</td>
                       <td className="px-4 py-3 text-sm text-indigo-600">
-                        {note.file_url ? (
-                          <a className="hover:underline" href={resolveFileUrl(note.file_url)} target="_blank" rel="noreferrer">下载</a>
+                        {getNoteAttachmentUrls(note).length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {getNoteAttachmentUrls(note).map((attachmentUrl, index) => (
+                              <a key={`${note.id}-file-${index}`} className="hover:underline" href={resolveFileUrl(attachmentUrl)} target="_blank" rel="noreferrer">
+                                下载{getNoteAttachmentUrls(note).length > 1 ? index + 1 : ''}
+                              </a>
+                            ))}
+                          </div>
                         ) : (
                           <span className="text-slate-400">无</span>
                         )}

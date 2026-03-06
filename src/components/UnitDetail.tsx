@@ -142,7 +142,7 @@ export default function UnitDetail() {
   const [plan, setPlan] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
   const [newNote, setNewNote] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [grading, setGrading] = useState(false);
@@ -498,7 +498,7 @@ export default function UnitDetail() {
   };
 
   const submitNote = async () => {
-    if (!newNote.trim() && !file) return;
+    if (!newNote.trim() && files.length === 0) return;
     setSubmittingNote(true);
     setNoteStreamStatus('正在上传并保存笔记...');
     setPlanActionError('');
@@ -509,8 +509,8 @@ export default function UnitDetail() {
       formData.append('unitId', id!);
       formData.append('week', unit.week_range);
       formData.append('content', newNote);
-      if (file) {
-        formData.append('file', file);
+      for (const file of files) {
+        formData.append('files', file);
       }
 
       const noteRes = await fetch(`${API_BASE_URL}/api/notes?stream=1`, {
@@ -567,7 +567,7 @@ export default function UnitDetail() {
         setPlanViewIndex(0);
       }
       setNewNote('');
-      setFile(null);
+      setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
       
       // Refresh notes and plan
@@ -917,32 +917,39 @@ export default function UnitDetail() {
                   id="note-file"
                   className="hidden"
                   accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.ipynb"
+                  multiple
                   ref={fileInputRef}
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  onChange={(e) => setFiles(Array.from(e.target.files || []))}
                 />
                 <label
                   htmlFor="note-file"
                   className="cursor-pointer flex items-center text-sm text-slate-600 hover:text-indigo-600 transition"
                 >
                   <Paperclip className="w-4 h-4 mr-1" />
-                  {file ? file.name : '添加附件 (PDF, 图片等)'}
+                  {files.length > 0 ? `已选择 ${files.length} 份附件` : '添加附件 (可多选：PDF, 图片等)'}
                 </label>
-                {file && (
+                {files.length > 0 && (
                   <button
                     onClick={() => {
-                      setFile(null);
+                      setFiles([]);
                       if (fileInputRef.current) fileInputRef.current.value = '';
                     }}
                     className="ml-2 text-red-500 hover:text-red-700 text-sm"
                   >
-                    删除
+                    清空
                   </button>
                 )}
               </div>
+
+              {files.length > 0 && (
+                <div className="text-xs text-slate-500 mr-3 max-w-[28rem] truncate">
+                  {files.map((item) => item.name).join('，')}
+                </div>
+              )}
               
               <button
                 onClick={submitNote}
-                disabled={(!newNote.trim() && !file) || submittingNote}
+                disabled={(!newNote.trim() && files.length === 0) || submittingNote}
                 className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 flex items-center"
               >
                 <Send className="w-4 h-4 mr-2" /> {submittingNote ? '提交中...' : '提交笔记'}
@@ -961,18 +968,28 @@ export default function UnitDetail() {
                     <Clock className="w-4 h-4 mr-1" /> {new Date(note.created_at).toLocaleString()}
                   </div>
                   <p className="text-slate-800 whitespace-pre-wrap mb-4">{note.content}</p>
-                  
-                  {note.file_url && (
+
+                  {((Array.isArray(note.file_urls) && note.file_urls.length > 0)
+                    ? note.file_urls
+                    : (note.file_url ? [note.file_url] : [])).length > 0 && (
                     <div className="mb-4">
-                      <a 
-                        href={note.file_url} 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-3 py-1.5 rounded-lg transition"
-                      >
-                        <Paperclip className="w-4 h-4 mr-1.5" />
-                        查看附件
-                      </a>
+                      <div className="text-xs text-slate-500 mb-2">附件：</div>
+                      <div className="flex flex-wrap gap-2">
+                        {((Array.isArray(note.file_urls) && note.file_urls.length > 0)
+                          ? note.file_urls
+                          : (note.file_url ? [note.file_url] : [])).map((attachmentUrl: string, index: number) => (
+                          <a
+                            key={`${note.id}-att-${index}`}
+                            href={attachmentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-3 py-1.5 rounded-lg transition"
+                          >
+                            <Paperclip className="w-4 h-4 mr-1.5" />
+                            查看附件 {index + 1}
+                          </a>
+                        ))}
+                      </div>
                     </div>
                   )}
 

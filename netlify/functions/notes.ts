@@ -16,6 +16,35 @@ const getTodayKey = () => {
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
+const parseNoteFileUrls = (note: any): string[] => {
+  const urlsFromJson = (() => {
+    try {
+      const parsed = JSON.parse(String(note?.file_urls || '[]'));
+      return Array.isArray(parsed) ? parsed.map((item: any) => String(item || '').trim()).filter(Boolean) : [];
+    } catch (err) {
+      return [];
+    }
+  })();
+  if (urlsFromJson.length > 0) return urlsFromJson;
+  const single = String(note?.file_url || '').trim();
+  return single ? [single] : [];
+};
+
+const withNoteFileUrls = (note: any) => ({ ...note, file_urls: parseNoteFileUrls(note) });
+
+const resolveAttachmentPathsFromUrls = (fileUrls: string[]) => {
+  const uploadsDir = process.env.UPLOADS_DIR || path.join(DATA_DIR, 'uploads');
+  return fileUrls
+    .map((url) => {
+      const normalized = String(url || '').trim();
+      if (!normalized) return null;
+      if (normalized.startsWith('/notes/')) return path.join(NOTES_DIR, path.basename(normalized));
+      if (normalized.startsWith('/uploads/')) return path.join(uploadsDir, path.basename(normalized));
+      return null;
+    })
+    .filter(Boolean) as string[];
+};
 if (!fs.existsSync(NOTES_DIR)) {
   fs.mkdirSync(NOTES_DIR, { recursive: true });
 }
@@ -61,7 +90,7 @@ export default async (req: Request) => {
     const match = url.pathname.match(/^\/api\/notes\/(\d+)$/);
     if (match) {
       const notes = db.prepare('SELECT * FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC').all(user.id, match[1]);
-      return new Response(JSON.stringify(notes));
+      return new Response(JSON.stringify((notes as any[]).map(withNoteFileUrls)));
     }
   }
 
@@ -71,7 +100,11 @@ export default async (req: Request) => {
       const unitId = formData.get('unitId') as string;
       const week = formData.get('week') as string;
       const content = formData.get('content') as string;
-      const file = formData.get('file') as File | null;
+      const files = formData.getAll('files').filter((item) => item instanceof File) as File[];
+      const legacySingle = formData.get('file');
+      const noteFiles = files.length > 0
+        ? files
+        : (legacySingle instanceof File ? [legacySingle] : []);
 
       const existingNotesCount = db.prepare('SELECT COUNT(*) as count FROM notes WHERE student_id = ? AND unit_id = ?').get(user.id, unitId) as { count: number };
       const noteVersion = Number(existingNotesCount?.count || 0) + 1;
@@ -81,20 +114,30 @@ export default async (req: Request) => {
       const noteContentForFile = (content || '').trim() || '（本次仅提交了附件，未填写文字内容）';
       fs.writeFileSync(noteContentPath, noteContentForFile, 'utf-8');
 
-      let fileUrl = null;
-      if (file) {
+      const fileUrls: string[] = [];
+      for (let index = 0; index < noteFiles.length; index++) {
+        const file = noteFiles[index];
         const buffer = Buffer.from(await file.arrayBuffer());
         const originalExt = path.extname(file.name || '').toLowerCase();
         const ext = originalExt || '.bin';
-        const filename = `note-s${user.id}-u${unitId}-n${noteVersion}-file${ext}`;
+        const suffix = noteFiles.length > 1 ? `-${index + 1}` : '';
+        const filename = `note-s${user.id}-u${unitId}-n${noteVersion}-file${suffix}${ext}`;
         fs.writeFileSync(path.join(NOTES_DIR, filename), buffer);
-        fileUrl = `/notes/${filename}`;
+        fileUrls.push(`/notes/${filename}`);
       }
+      const fileUrl = fileUrls[0] || null;
 
       const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(unitId) as any;
       if (!unit) return new Response(JSON.stringify({ error: 'Unit not found' }), { status: 404 });
 
-      const result = db.prepare('INSERT INTO notes (student_id, unit_id, week, content, file_url) VALUES (?, ?, ?, ?, ?)').run(user.id, unitId, week, content || '', fileUrl);
+      const result = db.prepare('INSERT INTO notes (student_id, unit_id, week, content, file_url, file_urls) VALUES (?, ?, ?, ?, ?, ?)').run(
+        user.id,
+        unitId,
+        week,
+        content || '',
+        fileUrl,
+        JSON.stringify(fileUrls)
+      );
       const noteId = result.lastInsertRowid;
 
       let adjustApplied = false;
@@ -128,13 +171,11 @@ export default async (req: Request) => {
               `单元周次范围: 第${unit.week_range}周`
             ].join('\n');
 
-            const baseAdjustPrompt = prompts.adjustPlan(unit, plan, content, fileUrl, progressContext);
-            const noteAttachmentPath = fileUrl && String(fileUrl).startsWith('/notes/')
-              ? path.join(NOTES_DIR, path.basename(String(fileUrl)))
-              : fileUrl && String(fileUrl).startsWith('/uploads/')
-                ? path.join(process.env.UPLOADS_DIR || path.join(DATA_DIR, 'uploads'), path.basename(String(fileUrl)))
-                : null;
-            const adjustPromptWithFile = noteAttachmentPath ? `${baseAdjustPrompt}\nFILES: ${noteAttachmentPath}` : baseAdjustPrompt;
+            const baseAdjustPrompt = prompts.adjustPlan(unit, plan, content, fileUrls, progressContext);
+            const noteAttachmentPaths = resolveAttachmentPathsFromUrls(fileUrls);
+            const adjustPromptWithFile = noteAttachmentPaths.length > 0
+              ? `${baseAdjustPrompt}\nFILES: ${noteAttachmentPaths.join(', ')}`
+              : baseAdjustPrompt;
             const { prompt: adjustPrompt } = await buildPromptWithFiles(adjustPromptWithFile, client);
 
             const response = await client.chat.completions.create({

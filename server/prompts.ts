@@ -1,4 +1,17 @@
 export const prompts = {
+  resolveNoteFileUrls: (latestNote: any): string[] => {
+    const listFromJson = (() => {
+      try {
+        const parsed = JSON.parse(String(latestNote?.file_urls || '[]'));
+        return Array.isArray(parsed) ? parsed.map((item) => String(item || '').trim()).filter(Boolean) : [];
+      } catch (err) {
+        return [];
+      }
+    })();
+    if (listFromJson.length > 0) return listFromJson;
+    const single = String(latestNote?.file_url || '').trim();
+    return single ? [single] : [];
+  },
   buildPlanPrompt: (basePrompt: string, pretestQuestion: string, pretestAnswer: string) => `${basePrompt}
 
 [学生基础水平测评题目]
@@ -64,7 +77,7 @@ FILES: /data/admin/unit_plan/unit${unit.id}/${unit.id}. ${unit.title}.pdf,
 
 
   // 2. AI根据笔记重新调整学习计划提示词
-  adjustPlan: (unit: any, plan: any, content: string, fileUrl: string | null, progressContext: string) => `学生提交了学习笔记。请根据学生的笔记进度，动态调整先前的学习计划，以便学生在该周剩下的时间里完成学习目标。
+  adjustPlan: (unit: any, plan: any, content: string, noteFileUrls: string[], progressContext: string) => `学生提交了学习笔记。请根据学生的笔记进度，动态调整先前的学习计划，以便学生在该周剩下的时间里完成学习目标。
 单元名称：${unit.title}
 单元学习时间范围：第${unit.week_range}周
 学习目标：${unit.objectives}
@@ -72,7 +85,8 @@ FILES: /data/admin/unit_plan/unit${unit.id}/${unit.id}. ${unit.title}.pdf,
 ${plan.plan_content}
 学生提交的笔记文字内容：
 ${content || '无'}
-学生是否提交了附件：${fileUrl ? '是 (PDF等格式)' : '否'}
+学生是否提交了附件：${noteFileUrls.length > 0 ? `是（共${noteFileUrls.length}份）` : '否'}
+学生附件列表：${noteFileUrls.length > 0 ? noteFileUrls.join('、') : '无'}
 
 时间与进度信息：
 ${progressContext}
@@ -88,7 +102,9 @@ FILES: /data/admin/plan_unit/unit${unit.id}/计算机视觉大纲_${unit.id}.md,
 4) 直接返回计划内容，不要输出思考过程。`,
 
   // 3. AI学习笔记评分提示词
-  gradeUnit: (unit: any, plan: any, latestNote: any) => `### 角色定位
+  gradeUnit: (unit: any, plan: any, latestNote: any) => {
+    const noteFileUrls = prompts.resolveNoteFileUrls(latestNote);
+    return `### 角色定位
 你是一位严谨、专业且富有启发性的“计算机视觉课程AI助教与评估专家”。你精通机器学习、深度学习及Python编程（如PyTorch框架、图像处理基础等），并具备丰富教学评估经验，能够根据教学目标和学生个性化学习计划进行客观、细致的量化评估。
 
 ### 任务目标
@@ -96,7 +112,7 @@ FILES: /data/admin/plan_unit/unit${unit.id}/计算机视觉大纲_${unit.id}.md,
 - 单元学习任务目标：${unit.objectives}
 - 学生专属学习计划（文本）：${plan ? plan.plan_content : '无'}
 - 学生最终提交的学习笔记文字：${latestNote.content || '无'}
-- 附件情况：${latestNote.file_url ? '有附件（系统将附加文件内容）' : '无附件'}
+- 附件情况：${noteFileUrls.length > 0 ? `有附件（共${noteFileUrls.length}份，系统将附加文件内容）` : '无附件'}
 - 该周总体计划指导文件（优先读取 plan_unit 路径，兼容 unit_plan 历史路径）：
 FILES: /data/admin/plan_unit/unit${unit.id}/计算机视觉大纲_${unit.id}.md, /data/admin/unit_plan/unit${unit.id}/计算机视觉大纲_${unit.id}.md
 
@@ -133,7 +149,8 @@ FILES: /data/admin/plan_unit/unit${unit.id}/计算机视觉大纲_${unit.id}.md,
 2) feedback: 详细评价与改进建议（字符串，可包含 Markdown 表格与分段）
 3) feedback 长度建议控制在 800-1400 个中文字符内，避免冗长导致截断
 
-返回示例：{"grade":85,"feedback":"..."}`,
+返回示例：{"grade":85,"feedback":"..."}`;
+  },
 
   progressAudit: (payload: {
     nowIso: string;

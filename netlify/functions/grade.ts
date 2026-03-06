@@ -4,6 +4,35 @@ import { authenticate, getAiClient, buildPromptWithFiles } from './utils';
 import { prompts } from '../../server/prompts';
 import path from 'path';
 
+const parseNoteFileUrls = (note: any): string[] => {
+  const urlsFromJson = (() => {
+    try {
+      const parsed = JSON.parse(String(note?.file_urls || '[]'));
+      return Array.isArray(parsed) ? parsed.map((item: any) => String(item || '').trim()).filter(Boolean) : [];
+    } catch (err) {
+      return [];
+    }
+  })();
+  if (urlsFromJson.length > 0) return urlsFromJson;
+  const single = String(note?.file_url || '').trim();
+  return single ? [single] : [];
+};
+
+const resolveAttachmentPathsFromUrls = (fileUrls: string[]) => {
+  const dataDir = process.env.DATA_DIR || '/data';
+  const notesDir = path.join(dataDir, 'notes');
+  const uploadsDir = process.env.UPLOADS_DIR || path.join(dataDir, 'uploads');
+  return fileUrls
+    .map((url) => {
+      const normalized = String(url || '').trim();
+      if (!normalized) return null;
+      if (normalized.startsWith('/notes/')) return path.join(notesDir, path.basename(normalized));
+      if (normalized.startsWith('/uploads/')) return path.join(uploadsDir, path.basename(normalized));
+      return null;
+    })
+    .filter(Boolean) as string[];
+};
+
 const parseGradeResult = (raw: string) => {
   if (!raw) return null;
   const trimmed = raw.trim();
@@ -49,13 +78,12 @@ export default async (req: Request) => {
 
       try {
         const { client, model } = getAiClient();
-        const basePrompt = prompts.gradeUnit(unit, plan, latestNote);
-        const noteAttachmentPath = latestNote.file_url && String(latestNote.file_url).startsWith('/notes/')
-          ? path.join(process.env.DATA_DIR || '/data', 'notes', path.basename(String(latestNote.file_url)))
-          : latestNote.file_url && String(latestNote.file_url).startsWith('/uploads/')
-            ? path.join(process.env.UPLOADS_DIR || path.join(process.env.DATA_DIR || '/data', 'uploads'), path.basename(String(latestNote.file_url)))
-            : null;
-        const promptWithNoteFile = noteAttachmentPath ? `${basePrompt}\nFILES: ${noteAttachmentPath}` : basePrompt;
+        const noteFileUrls = parseNoteFileUrls(latestNote);
+        const basePrompt = prompts.gradeUnit(unit, plan, { ...latestNote, file_urls: noteFileUrls });
+        const noteAttachmentPaths = resolveAttachmentPathsFromUrls(noteFileUrls);
+        const promptWithNoteFile = noteAttachmentPaths.length > 0
+          ? `${basePrompt}\nFILES: ${noteAttachmentPaths.join(', ')}`
+          : basePrompt;
         const { prompt, files } = await buildPromptWithFiles(promptWithNoteFile, client);
 
         const response = await client.chat.completions.create({

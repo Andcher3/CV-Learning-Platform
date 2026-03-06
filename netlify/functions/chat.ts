@@ -4,6 +4,35 @@ import { prompts } from '../../server/prompts';
 import db from './db';
 import path from 'path';
 
+const parseNoteFileUrls = (note: any): string[] => {
+  const urlsFromJson = (() => {
+    try {
+      const parsed = JSON.parse(String(note?.file_urls || '[]'));
+      return Array.isArray(parsed) ? parsed.map((item: any) => String(item || '').trim()).filter(Boolean) : [];
+    } catch (err) {
+      return [];
+    }
+  })();
+  if (urlsFromJson.length > 0) return urlsFromJson;
+  const single = String(note?.file_url || '').trim();
+  return single ? [single] : [];
+};
+
+const resolveAttachmentPathsFromUrls = (fileUrls: string[]) => {
+  const dataDir = process.env.DATA_DIR || '/data';
+  const notesDir = path.join(dataDir, 'notes');
+  const uploadsDir = process.env.UPLOADS_DIR || path.join(dataDir, 'uploads');
+  return fileUrls
+    .map((url) => {
+      const normalized = String(url || '').trim();
+      if (!normalized) return null;
+      if (normalized.startsWith('/notes/')) return path.join(notesDir, path.basename(normalized));
+      if (normalized.startsWith('/uploads/')) return path.join(uploadsDir, path.basename(normalized));
+      return null;
+    })
+    .filter(Boolean) as string[];
+};
+
 export default async (req: Request) => {
   const url = new URL(req.url);
   let user;
@@ -19,25 +48,26 @@ export default async (req: Request) => {
       const { client, model } = getAiClient();
       let latestNoteContext = '';
       if (unitId) {
-        const latestNote = db.prepare('SELECT content, file_url, created_at FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(user.id, unitId) as any;
+        const latestNote = db.prepare('SELECT content, file_url, file_urls, created_at FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(user.id, unitId) as any;
         if (latestNote) {
-          latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n提交时间：${latestNote.created_at || '未知'}\n笔记内容：${latestNote.content || '无'}\n是否有附件：${latestNote.file_url ? `是（${latestNote.file_url}）` : '否'}\n`;
+          const noteFileUrls = parseNoteFileUrls(latestNote);
+          latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n提交时间：${latestNote.created_at || '未知'}\n笔记内容：${latestNote.content || '无'}\n是否有附件：${noteFileUrls.length > 0 ? `是（共${noteFileUrls.length}份：${noteFileUrls.join('、')}）` : '否'}\n`;
         } else {
           latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n当前无笔记记录。\n`;
         }
       }
 
       const mergedContext = `${context || ''}${latestNoteContext}`;
-      const latestAttachment = unitId
-        ? (db.prepare('SELECT file_url FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(user.id, unitId) as any)?.file_url
+      const latestAttachmentNote = unitId
+        ? db.prepare('SELECT file_url, file_urls FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(user.id, unitId) as any
         : null;
-      const latestAttachmentFile = latestAttachment && String(latestAttachment).startsWith('/notes/')
-        ? path.join(process.env.DATA_DIR || '/data', 'notes', path.basename(String(latestAttachment)))
-        : latestAttachment && String(latestAttachment).startsWith('/uploads/')
-          ? path.join(process.env.UPLOADS_DIR || path.join(process.env.DATA_DIR || '/data', 'uploads'), path.basename(String(latestAttachment)))
-          : null;
+      const latestAttachmentFiles = latestAttachmentNote
+        ? resolveAttachmentPathsFromUrls(parseNoteFileUrls(latestAttachmentNote))
+        : [];
       const basePrompt = prompts.qaAssistant(mergedContext, question);
-      const promptWithAttachment = latestAttachmentFile ? `${basePrompt}\nFILES: ${latestAttachmentFile}` : basePrompt;
+      const promptWithAttachment = latestAttachmentFiles.length > 0
+        ? `${basePrompt}\nFILES: ${latestAttachmentFiles.join(', ')}`
+        : basePrompt;
       const { prompt, files } = await buildPromptWithFiles(promptWithAttachment, client);
 
       const response = await client.chat.completions.create({
