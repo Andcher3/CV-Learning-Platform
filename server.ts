@@ -20,6 +20,11 @@ const MAX_PLAN_GENERATIONS = Math.max(0, Number(process.env.MAX_PLAN_GENERATIONS
 const MAX_PLAN_ADJUSTMENTS = Math.max(0, Number(process.env.MAX_PLAN_ADJUSTMENTS || 3));
 const COURSE_START_UTC8_MS = Date.UTC(2026, 2, 1, 16, 0, 0);
 const WEEKDAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+const NOTE_ALLOWED_EXTENSIONS = new Set([
+  '.md', '.txt', '.pdf', '.ipynb', '.py', '.js', '.ts', '.tsx', '.json', '.yaml', '.yml', '.csv', '.html', '.css', '.java', '.cpp', '.c', '.go', '.sh',
+  '.doc', '.docx', '.ppt', '.pptx',
+  '.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.m4a'
+]);
 const toUtc8IsoString = (date: Date) => {
   const utc8Ms = date.getTime() + 8 * 60 * 60 * 1000;
   return new Date(utc8Ms).toISOString().replace('Z', '+08:00');
@@ -1779,6 +1784,20 @@ async function startServer() {
       ...(uploadedByField.files || []),
       ...(uploadedByField.file || [])
     ];
+
+    const invalidFiles = uploadedFiles.filter((file) => {
+      const ext = path.extname(String(file.originalname || '')).toLowerCase();
+      return !NOTE_ALLOWED_EXTENSIONS.has(ext);
+    });
+    if (invalidFiles.length > 0) {
+      for (const file of uploadedFiles) {
+        try {
+          if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        } catch (err) {}
+      }
+      const names = invalidFiles.map((file) => String(file.originalname || '未知文件')).join('、');
+      return respondError(400, `以下文件类型暂不支持上传：${names}`);
+    }
 
     const fileUrls: string[] = [];
     for (let index = 0; index < uploadedFiles.length; index++) {

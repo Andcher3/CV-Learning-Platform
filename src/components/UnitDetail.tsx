@@ -5,6 +5,20 @@ import SidebarAI from './SidebarAI';
 import { marked } from 'marked';
 import { formatDateTimeCn } from '../utils/datetime';
 
+const NOTE_ALLOWED_EXTENSIONS = [
+  '.md', '.txt', '.pdf', '.ipynb', '.py', '.js', '.ts', '.tsx', '.json', '.yaml', '.yml', '.csv', '.html', '.css', '.java', '.cpp', '.c', '.go', '.sh',
+  '.doc', '.docx', '.ppt', '.pptx',
+  '.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.m4a'
+];
+const NOTE_ALLOWED_EXTENSION_SET = new Set(NOTE_ALLOWED_EXTENSIONS);
+const NOTE_FILE_ACCEPT = NOTE_ALLOWED_EXTENSIONS.join(',');
+
+const getFileExt = (filename: string) => {
+  const raw = String(filename || '').trim().toLowerCase();
+  const index = raw.lastIndexOf('.');
+  return index >= 0 ? raw.slice(index) : '';
+};
+
 const unwrapOuterMarkdownFence = (text: string) => {
   const raw = String(text || '').trim();
   const matched = raw.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i);
@@ -917,17 +931,30 @@ export default function UnitDetail() {
                   type="file"
                   id="note-file"
                   className="hidden"
-                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.ipynb"
+                  accept={NOTE_FILE_ACCEPT}
                   multiple
                   ref={fileInputRef}
-                  onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.files || []) as File[];
+                    const accepted = selected.filter((file) => NOTE_ALLOWED_EXTENSION_SET.has(getFileExt(file.name)));
+                    const rejected = selected.filter((file) => !NOTE_ALLOWED_EXTENSION_SET.has(getFileExt(file.name)));
+
+                    if (rejected.length > 0) {
+                      const names = rejected.map((file) => file.name).join('，');
+                      setPlanActionError(`以下文件类型暂不支持上传：${names}`);
+                    } else {
+                      setPlanActionError('');
+                    }
+
+                    setFiles(accepted);
+                  }}
                 />
                 <label
                   htmlFor="note-file"
                   className="cursor-pointer flex items-center text-sm text-slate-600 hover:text-indigo-600 transition"
                 >
                   <Paperclip className="w-4 h-4 mr-1" />
-                  {files.length > 0 ? `已选择 ${files.length} 份附件` : '添加附件 (可多选：PDF, 图片等)'}
+                  {files.length > 0 ? `已选择 ${files.length} 份附件` : '添加附件 (可多选：文档/代码/图片/音视频)'}
                 </label>
                 {files.length > 0 && (
                   <button
