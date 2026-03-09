@@ -46,6 +46,12 @@ const getCourseWeekdayLabel = (date: Date) => {
   return `第${week}周${weekday}`;
 };
 
+const getCourseElapsedDays = (date: Date) => {
+  const utc8Ms = date.getTime() + 8 * 60 * 60 * 1000;
+  const diffDays = Math.floor((utc8Ms - COURSE_START_UTC8_MS) / (24 * 60 * 60 * 1000));
+  return Math.max(0, diffDays);
+};
+
 const getPretestFilePath = (unitId: number) => {
   const folder = path.join(DATA_DIR, `admin/plan_test`);
   const filename = `unit${unitId}.md`;
@@ -422,20 +428,27 @@ async function startServer() {
     `).get(studentId) as any;
 
     if (!latestPlan) {
+      const lagDays = getCourseElapsedDays(now);
+      const status = lagDays >= 4 ? 'seriously_behind' : lagDays >= 1 ? 'slightly_behind' : 'on_track';
+      const hasNote = !!latestNote;
       const fallback = {
         student_id: studentId,
         day_key: dayKey,
-        status: 'on_track',
-        lag_days: 0,
-        should_remind: 0,
-        reason: '当前暂无学习计划，暂不进行滞后提醒判定。',
-        suggestion: '请先生成学习计划，然后系统会自动跟踪进度。',
+        status,
+        lag_days: lagDays,
+        should_remind: lagDays >= 4 ? 1 : 0,
+        reason: hasNote
+          ? `当前已进入${courseWeekday}，但学生尚未生成学习计划；按“进度=0”计入，当前滞后约${lagDays}天。`
+          : `当前已进入${courseWeekday}，且学生既未生成学习计划也未提交笔记；按“进度=0”计入，当前滞后约${lagDays}天。`,
+        suggestion: lagDays >= 4
+          ? '请立即生成本周学习计划，并先提交一次最小可交付学习笔记以恢复进度。'
+          : '请尽快生成学习计划，并在当天提交首条学习笔记，避免继续滞后。',
         checked_at: toUtc8IsoString(now),
         trigger_source: triggerSource,
         course_weekday: courseWeekday,
         plan_id: null,
         note_id: latestNote?.id || null,
-        detail_json: JSON.stringify({ fallback: true, no_plan: true })
+        detail_json: JSON.stringify({ fallback: true, no_plan: true, progress_as_zero: true, has_note: hasNote })
       };
       db.prepare(`
         INSERT INTO progress_checks (student_id, day_key, status, lag_days, should_remind, reason, suggestion, trigger_source, course_weekday, plan_id, note_id, detail_json)
