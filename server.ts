@@ -38,8 +38,9 @@ const getTodayKey = () => {
 };
 
 const getCourseWeekdayLabel = (date: Date) => {
-  const utc8Ms = date.getTime() + 8 * 60 * 60 * 1000;
-  const diffDays = Math.floor((utc8Ms - COURSE_START_UTC8_MS) / (24 * 60 * 60 * 1000));
+  // COURSE_START_UTC8_MS already stores the UTC timestamp of 2026-03-02 00:00 (UTC+8).
+  // Compare directly with epoch ms to avoid applying UTC+8 offset twice.
+  const diffDays = Math.floor((date.getTime() - COURSE_START_UTC8_MS) / (24 * 60 * 60 * 1000));
   const safeDiffDays = Math.max(0, diffDays);
   const week = Math.floor(safeDiffDays / 7) + 1;
   const weekday = WEEKDAY_NAMES[safeDiffDays % 7];
@@ -47,8 +48,7 @@ const getCourseWeekdayLabel = (date: Date) => {
 };
 
 const getCourseElapsedDays = (date: Date) => {
-  const utc8Ms = date.getTime() + 8 * 60 * 60 * 1000;
-  const diffDays = Math.floor((utc8Ms - COURSE_START_UTC8_MS) / (24 * 60 * 60 * 1000));
+  const diffDays = Math.floor((date.getTime() - COURSE_START_UTC8_MS) / (24 * 60 * 60 * 1000));
   return Math.max(0, diffDays);
 };
 
