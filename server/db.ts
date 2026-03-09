@@ -23,7 +23,8 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'student'
+    role TEXT NOT NULL DEFAULT 'student',
+    last_read_announcement_id INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS units (
@@ -82,6 +83,15 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS announcements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_by INTEGER,
+    published_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(created_by) REFERENCES users(id)
   );
 
   CREATE TABLE IF NOT EXISTS progress_checks (
@@ -234,6 +244,11 @@ try {
 }
 try {
   db.exec("ALTER TABLE feedbacks ADD COLUMN replied_at DATETIME");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE users ADD COLUMN last_read_announcement_id INTEGER NOT NULL DEFAULT 0");
 } catch (e) {
   // Column might already exist
 }

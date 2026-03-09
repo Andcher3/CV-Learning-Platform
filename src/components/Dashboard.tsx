@@ -6,6 +6,10 @@ import { formatDateTimeCn } from '../utils/datetime';
 export default function Dashboard() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [units, setUnits] = useState<any[]>([]);
+  const [announcement, setAnnouncement] = useState<any>(null);
+  const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
+  const [announcementAckLoading, setAnnouncementAckLoading] = useState(false);
+  const [announcementAckError, setAnnouncementAckError] = useState('');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -59,8 +63,49 @@ export default function Dashboard() {
           }
         })
         .catch(console.error);
+
+      fetch(`${API_BASE_URL}/api/announcements/pending`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data?.pending && data?.announcement) {
+            setAnnouncement(data.announcement);
+            setShowAnnouncementModal(true);
+          }
+        })
+        .catch(console.error);
     }
   }, [navigate]);
+
+  const handleConfirmAnnouncement = async () => {
+    if (!announcement?.id) {
+      setShowAnnouncementModal(false);
+      return;
+    }
+    setAnnouncementAckLoading(true);
+    setAnnouncementAckError('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/api/announcements/ack`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ announcementId: announcement.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || '确认失败');
+
+      setShowAnnouncementModal(false);
+      setAnnouncement(null);
+    } catch (err: any) {
+      setAnnouncementAckError(err?.message || '确认失败');
+    } finally {
+      setAnnouncementAckLoading(false);
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -405,6 +450,29 @@ export default function Dashboard() {
                 className="px-4 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition"
               >
                 我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAnnouncementModal && announcement && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-xl rounded-2xl p-6 shadow-xl border border-indigo-200">
+            <h3 className="text-lg font-semibold text-indigo-700 mb-1">课程公告</h3>
+            <p className="text-xs text-slate-500 mb-3">发布时间：{formatDate(announcement.published_at)}</p>
+            <h4 className="text-base font-semibold text-slate-900 mb-2">{announcement.title}</h4>
+            <div className="text-sm text-slate-700 whitespace-pre-wrap max-h-72 overflow-y-auto pr-1">{announcement.content}</div>
+            {announcementAckError && (
+              <div className="mt-3 bg-rose-50 text-rose-700 border border-rose-100 rounded-lg p-2 text-sm">{announcementAckError}</div>
+            )}
+            <div className="mt-5 flex justify-end">
+              <button
+                onClick={handleConfirmAnnouncement}
+                disabled={announcementAckLoading}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition disabled:opacity-50"
+              >
+                {announcementAckLoading ? '确认中...' : '确认已阅读'}
               </button>
             </div>
           </div>

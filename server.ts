@@ -732,6 +732,38 @@ async function startServer() {
     }
   });
 
+  app.get('/api/admin/announcements/latest', authenticate, requireAdmin, (req: any, res: any) => {
+    const latest = db.prepare(`
+      SELECT a.*, u.username AS created_by_username
+      FROM announcements a
+      LEFT JOIN users u ON u.id = a.created_by
+      ORDER BY a.id DESC
+      LIMIT 1
+    `).get() as any;
+    res.json(latest || null);
+  });
+
+  app.post('/api/admin/announcements/publish', authenticate, requireAdmin, (req: any, res: any) => {
+    const title = String(req.body?.title || '').trim();
+    const content = String(req.body?.content || '').trim();
+    if (!title) {
+      return res.status(400).json({ error: '公告标题不能为空' });
+    }
+    if (!content) {
+      return res.status(400).json({ error: '公告内容不能为空' });
+    }
+
+    const result = db.prepare('INSERT INTO announcements (title, content, created_by) VALUES (?, ?, ?)')
+      .run(title, content, req.user.id);
+    const created = db.prepare(`
+      SELECT a.*, u.username AS created_by_username
+      FROM announcements a
+      LEFT JOIN users u ON u.id = a.created_by
+      WHERE a.id = ?
+    `).get(result.lastInsertRowid) as any;
+    res.json({ message: '公告已发布', announcement: created });
+  });
+
   // Admin Records API
   app.get('/api/admin/notes', authenticate, requireAdmin, (req: any, res: any) => {
     const notes = db.prepare(`
@@ -1012,6 +1044,48 @@ async function startServer() {
       student_answers: parseJson(assignment.student_answers, {}),
       grading_detail: parseJson(assignment.grading_detail, []),
     });
+  });
+
+  app.get('/api/announcements/pending', authenticate, (req: any, res: any) => {
+    if (req.user.role !== 'student') {
+      return res.json({ pending: false, announcement: null });
+    }
+
+    const latest = db.prepare(`
+      SELECT a.*, u.username AS created_by_username
+      FROM announcements a
+      LEFT JOIN users u ON u.id = a.created_by
+      ORDER BY a.id DESC
+      LIMIT 1
+    `).get() as any;
+    if (!latest) {
+      return res.json({ pending: false, announcement: null });
+    }
+
+    const userRow = db.prepare('SELECT last_read_announcement_id FROM users WHERE id = ?').get(req.user.id) as any;
+    const lastReadId = Number(userRow?.last_read_announcement_id || 0);
+    const pending = Number(latest.id || 0) > lastReadId;
+
+    return res.json({ pending, announcement: pending ? latest : null });
+  });
+
+  app.post('/api/announcements/ack', authenticate, (req: any, res: any) => {
+    const announcementId = Number(req.body?.announcementId);
+    if (!Number.isFinite(announcementId) || announcementId <= 0) {
+      return res.status(400).json({ error: '无效的公告ID' });
+    }
+
+    const existing = db.prepare('SELECT id FROM announcements WHERE id = ?').get(announcementId) as any;
+    if (!existing) {
+      return res.status(404).json({ error: '公告不存在' });
+    }
+
+    const userRow = db.prepare('SELECT last_read_announcement_id FROM users WHERE id = ?').get(req.user.id) as any;
+    const current = Number(userRow?.last_read_announcement_id || 0);
+    const nextReadId = Math.max(current, announcementId);
+    db.prepare('UPDATE users SET last_read_announcement_id = ? WHERE id = ?').run(nextReadId, req.user.id);
+
+    res.json({ success: true, last_read_announcement_id: nextReadId });
   });
 
   app.post('/api/quiz/:id/submit', authenticate, (req: any, res: any) => {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save, FileText, MessageSquare } from 'lucide-react';
+import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save, FileText, MessageSquare, Megaphone } from 'lucide-react';
 import { marked } from 'marked';
 import { formatDateTimeCn } from '../utils/datetime';
 
@@ -75,7 +75,7 @@ const sortRows = <T,>(rows: T[], getter: (row: T) => any, direction: SortDirecti
 };
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'users' | 'records' | 'feedbacks' | 'settings' | 'quizzes'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'records' | 'feedbacks' | 'settings' | 'quizzes' | 'announcements'>('users');
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
@@ -123,6 +123,12 @@ export default function AdminDashboard() {
           >
             <FileText className="w-5 h-5 mr-3" /> 测试发放
           </button>
+          <button
+            onClick={() => setActiveTab('announcements')}
+            className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg ${activeTab === 'announcements' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-100'}`}
+          >
+            <Megaphone className="w-5 h-5 mr-3" /> 公告发布
+          </button>
         </nav>
         <button
           onClick={() => navigate('/dashboard')}
@@ -134,7 +140,144 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <div className="flex-1 p-8 overflow-y-auto">
-        {activeTab === 'users' ? <UsersManagement /> : activeTab === 'records' ? <AdminRecords /> : activeTab === 'feedbacks' ? <AdminFeedbacks /> : activeTab === 'quizzes' ? <AdminQuizzes /> : <AISettings />}
+        {activeTab === 'users' ? <UsersManagement /> : activeTab === 'records' ? <AdminRecords /> : activeTab === 'feedbacks' ? <AdminFeedbacks /> : activeTab === 'quizzes' ? <AdminQuizzes /> : activeTab === 'announcements' ? <AdminAnnouncements /> : <AISettings />}
+      </div>
+    </div>
+  );
+}
+
+function AdminAnnouncements() {
+  const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [latest, setLatest] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const loadLatest = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/announcements/latest`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '公告加载失败');
+      }
+      setLatest(data);
+    } catch (err: any) {
+      setError(err?.message || '公告加载失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadLatest().catch(console.error);
+  }, []);
+
+  const publish = async () => {
+    const trimmedTitle = title.trim();
+    const trimmedContent = content.trim();
+    if (!trimmedTitle) {
+      setError('请输入公告标题');
+      return;
+    }
+    if (!trimmedContent) {
+      setError('请输入公告内容');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/announcements/publish`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ title: trimmedTitle, content: trimmedContent })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '发布失败');
+      }
+      setMessage(data?.message || '公告已发布');
+      setTitle('');
+      setContent('');
+      setLatest(data?.announcement || null);
+    } catch (err: any) {
+      setError(err?.message || '发布失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">公告发布</h2>
+          <p className="text-slate-500 mt-1">学生首次登录后会弹出最新公告并要求确认。</p>
+        </div>
+        <button onClick={() => loadLatest()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">刷新</button>
+      </div>
+
+      {error && <div className="bg-rose-50 text-rose-700 border border-rose-100 rounded-lg p-3 text-sm">{error}</div>}
+      {message && <div className="bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg p-3 text-sm">{message}</div>}
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">公告标题</label>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="例如：第2周学习任务提醒"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">公告内容</label>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={8}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="请输入要通知学生的内容..."
+          />
+        </div>
+        <div>
+          <button
+            onClick={publish}
+            disabled={saving}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50"
+          >
+            {saving ? '发布中...' : '发布公告'}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+        <h3 className="text-lg font-semibold text-slate-900 mb-2">当前最新公告</h3>
+        {loading ? (
+          <div className="text-sm text-slate-500">加载中...</div>
+        ) : latest ? (
+          <div className="space-y-2">
+            <div className="text-base font-semibold text-slate-900">{latest.title}</div>
+            <div className="text-xs text-slate-500">
+              发布时间：{formatDateTimeCn(latest.published_at)}
+              {latest.created_by_username ? ` · 发布人：${latest.created_by_username}` : ''}
+            </div>
+            <div className="text-sm text-slate-700 whitespace-pre-wrap">{latest.content}</div>
+          </div>
+        ) : (
+          <div className="text-sm text-slate-500">暂无公告</div>
+        )}
       </div>
     </div>
   );
