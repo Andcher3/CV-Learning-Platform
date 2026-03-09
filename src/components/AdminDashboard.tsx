@@ -150,24 +150,24 @@ function AdminAnnouncements() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [latest, setLatest] = useState<any>(null);
+  const [announcements, setAnnouncements] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  const loadLatest = async () => {
+  const loadAnnouncements = async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/announcements/latest`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/announcements`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data?.error || '公告加载失败');
       }
-      setLatest(data);
+      setAnnouncements(Array.isArray(data) ? data : []);
     } catch (err: any) {
       setError(err?.message || '公告加载失败');
     } finally {
@@ -176,7 +176,7 @@ function AdminAnnouncements() {
   };
 
   useEffect(() => {
-    loadLatest().catch(console.error);
+    loadAnnouncements().catch(console.error);
   }, []);
 
   const publish = async () => {
@@ -210,7 +210,7 @@ function AdminAnnouncements() {
       setMessage(data?.message || '公告已发布');
       setTitle('');
       setContent('');
-      setLatest(data?.announcement || null);
+      await loadAnnouncements();
     } catch (err: any) {
       setError(err?.message || '发布失败');
     } finally {
@@ -223,9 +223,9 @@ function AdminAnnouncements() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">公告发布</h2>
-          <p className="text-slate-500 mt-1">学生首次登录后会弹出最新公告并要求确认。</p>
+          <p className="text-slate-500 mt-1">学生首次登录后会依次弹出所有未读公告并要求确认。</p>
         </div>
-        <button onClick={() => loadLatest()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">刷新</button>
+        <button onClick={() => loadAnnouncements()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">刷新</button>
       </div>
 
       {error && <div className="bg-rose-50 text-rose-700 border border-rose-100 rounded-lg p-3 text-sm">{error}</div>}
@@ -263,17 +263,21 @@ function AdminAnnouncements() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-        <h3 className="text-lg font-semibold text-slate-900 mb-2">当前最新公告</h3>
+        <h3 className="text-lg font-semibold text-slate-900 mb-2">公告历史</h3>
         {loading ? (
           <div className="text-sm text-slate-500">加载中...</div>
-        ) : latest ? (
-          <div className="space-y-2">
-            <div className="text-base font-semibold text-slate-900">{latest.title}</div>
-            <div className="text-xs text-slate-500">
-              发布时间：{formatDateTimeCn(latest.published_at)}
-              {latest.created_by_username ? ` · 发布人：${latest.created_by_username}` : ''}
-            </div>
-            <div className="text-sm text-slate-700 whitespace-pre-wrap">{latest.content}</div>
+        ) : announcements.length > 0 ? (
+          <div className="space-y-4 max-h-[28rem] overflow-y-auto pr-1">
+            {announcements.map((item) => (
+              <div key={item.id} className="rounded-lg border border-slate-200 p-4">
+                <div className="text-base font-semibold text-slate-900">{item.title}</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  ID: {item.id} · 发布时间：{formatDateTimeCn(item.published_at)}
+                  {item.created_by_username ? ` · 发布人：${item.created_by_username}` : ''}
+                </div>
+                <div className="text-sm text-slate-700 whitespace-pre-wrap mt-2">{item.content}</div>
+              </div>
+            ))}
           </div>
         ) : (
           <div className="text-sm text-slate-500">暂无公告</div>

@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, LogOut, FileText, CheckCircle, Library } from 'lucide-react';
+import { BookOpen, LogOut, FileText, CheckCircle, Library, Mail } from 'lucide-react';
 import { formatDateTimeCn } from '../utils/datetime';
 
 export default function Dashboard() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [units, setUnits] = useState<any[]>([]);
-  const [announcement, setAnnouncement] = useState<any>(null);
+  const [announcementQueue, setAnnouncementQueue] = useState<any[]>([]);
+  const [announcementHistory, setAnnouncementHistory] = useState<any[]>([]);
+  const [showAnnouncementInbox, setShowAnnouncementInbox] = useState(false);
+  const [announcementHistoryLoading, setAnnouncementHistoryLoading] = useState(false);
+  const [announcementUnreadCount, setAnnouncementUnreadCount] = useState(0);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [announcementAckLoading, setAnnouncementAckLoading] = useState(false);
   const [announcementAckError, setAnnouncementAckError] = useState('');
@@ -69,8 +73,10 @@ export default function Dashboard() {
       })
         .then(res => res.json())
         .then(data => {
-          if (data?.pending && data?.announcement) {
-            setAnnouncement(data.announcement);
+          const queue = Array.isArray(data?.announcements) ? data.announcements : [];
+          setAnnouncementUnreadCount(Number(data?.pending_count || queue.length || 0));
+          if (data?.pending && queue.length > 0) {
+            setAnnouncementQueue(queue);
             setShowAnnouncementModal(true);
           }
         })
@@ -78,8 +84,28 @@ export default function Dashboard() {
     }
   }, [navigate]);
 
+  const currentAnnouncement = announcementQueue[0] || null;
+
+  const loadAnnouncementHistory = async () => {
+    setAnnouncementHistoryLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/api/announcements/history`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || '公告历史加载失败');
+      setAnnouncementHistory(Array.isArray(data?.announcements) ? data.announcements : []);
+      setAnnouncementUnreadCount(Number(data?.unread_count || 0));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAnnouncementHistoryLoading(false);
+    }
+  };
+
   const handleConfirmAnnouncement = async () => {
-    if (!announcement?.id) {
+    if (!currentAnnouncement?.id) {
       setShowAnnouncementModal(false);
       return;
     }
@@ -93,13 +119,20 @@ export default function Dashboard() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ announcementId: announcement.id }),
+        body: JSON.stringify({ announcementId: currentAnnouncement.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || '确认失败');
 
-      setShowAnnouncementModal(false);
-      setAnnouncement(null);
+      setAnnouncementQueue((prev) => {
+        const next = prev.slice(1);
+        if (next.length === 0) {
+          setShowAnnouncementModal(false);
+        }
+        setAnnouncementUnreadCount(next.length);
+        return next;
+      });
+      setAnnouncementAckError('');
     } catch (err: any) {
       setAnnouncementAckError(err?.message || '确认失败');
     } finally {
@@ -220,6 +253,23 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-slate-600">你好, {user.username}</span>
+              {user.role === 'student' && (
+                <button
+                  onClick={() => {
+                    setShowAnnouncementInbox(true);
+                    loadAnnouncementHistory().catch(console.error);
+                  }}
+                  className="relative text-indigo-600 hover:text-indigo-800 transition"
+                  title="公告消息"
+                >
+                  <Mail className="w-5 h-5" />
+                  {announcementUnreadCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[1rem] h-4 px-1 rounded-full bg-rose-600 text-white text-[10px] leading-4 text-center">
+                      {announcementUnreadCount > 99 ? '99+' : announcementUnreadCount}
+                    </span>
+                  )}
+                </button>
+              )}
               {user.role === 'student' && (
                 <button
                   onClick={() => {
@@ -456,13 +506,14 @@ export default function Dashboard() {
         </div>
       )}
 
-      {showAnnouncementModal && announcement && (
+      {showAnnouncementModal && currentAnnouncement && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white w-full max-w-xl rounded-2xl p-6 shadow-xl border border-indigo-200">
             <h3 className="text-lg font-semibold text-indigo-700 mb-1">课程公告</h3>
-            <p className="text-xs text-slate-500 mb-3">发布时间：{formatDate(announcement.published_at)}</p>
-            <h4 className="text-base font-semibold text-slate-900 mb-2">{announcement.title}</h4>
-            <div className="text-sm text-slate-700 whitespace-pre-wrap max-h-72 overflow-y-auto pr-1">{announcement.content}</div>
+            <p className="text-xs text-slate-500 mb-1">发布时间：{formatDate(currentAnnouncement.published_at)}</p>
+            <p className="text-xs text-slate-500 mb-3">未读公告：{announcementQueue.length} 条</p>
+            <h4 className="text-base font-semibold text-slate-900 mb-2">{currentAnnouncement.title}</h4>
+            <div className="text-sm text-slate-700 whitespace-pre-wrap max-h-72 overflow-y-auto pr-1">{currentAnnouncement.content}</div>
             {announcementAckError && (
               <div className="mt-3 bg-rose-50 text-rose-700 border border-rose-100 rounded-lg p-2 text-sm">{announcementAckError}</div>
             )}
@@ -475,6 +526,41 @@ export default function Dashboard() {
                 {announcementAckLoading ? '确认中...' : '确认已阅读'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showAnnouncementInbox && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-2xl rounded-2xl p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-slate-900">公告消息</h3>
+              <button
+                onClick={() => setShowAnnouncementInbox(false)}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                关闭
+              </button>
+            </div>
+
+            {announcementHistoryLoading ? (
+              <div className="text-sm text-slate-500">加载中...</div>
+            ) : announcementHistory.length > 0 ? (
+              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                {announcementHistory.map((item: any) => (
+                  <div key={item.id} className={`rounded-lg border p-3 ${item.is_read ? 'border-slate-200 bg-white' : 'border-indigo-200 bg-indigo-50/40'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-slate-900">{item.title}</div>
+                      {!item.is_read && <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-semibold">未读</span>}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">发布时间：{formatDate(item.published_at)}</div>
+                    <div className="text-sm text-slate-700 whitespace-pre-wrap mt-2">{item.content}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-slate-500">暂无公告</div>
+            )}
           </div>
         </div>
       )}

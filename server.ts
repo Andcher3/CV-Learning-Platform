@@ -743,6 +743,16 @@ async function startServer() {
     res.json(latest || null);
   });
 
+  app.get('/api/admin/announcements', authenticate, requireAdmin, (req: any, res: any) => {
+    const rows = db.prepare(`
+      SELECT a.*, u.username AS created_by_username
+      FROM announcements a
+      LEFT JOIN users u ON u.id = a.created_by
+      ORDER BY a.id DESC
+    `).all() as any[];
+    res.json(rows);
+  });
+
   app.post('/api/admin/announcements/publish', authenticate, requireAdmin, (req: any, res: any) => {
     const title = String(req.body?.title || '').trim();
     const content = String(req.body?.content || '').trim();
@@ -1048,25 +1058,51 @@ async function startServer() {
 
   app.get('/api/announcements/pending', authenticate, (req: any, res: any) => {
     if (req.user.role !== 'student') {
-      return res.json({ pending: false, announcement: null });
-    }
-
-    const latest = db.prepare(`
-      SELECT a.*, u.username AS created_by_username
-      FROM announcements a
-      LEFT JOIN users u ON u.id = a.created_by
-      ORDER BY a.id DESC
-      LIMIT 1
-    `).get() as any;
-    if (!latest) {
-      return res.json({ pending: false, announcement: null });
+      return res.json({ pending: false, announcements: [], announcement: null });
     }
 
     const userRow = db.prepare('SELECT last_read_announcement_id FROM users WHERE id = ?').get(req.user.id) as any;
     const lastReadId = Number(userRow?.last_read_announcement_id || 0);
-    const pending = Number(latest.id || 0) > lastReadId;
+    const announcements = db.prepare(`
+      SELECT a.*, u.username AS created_by_username
+      FROM announcements a
+      LEFT JOIN users u ON u.id = a.created_by
+      WHERE a.id > ?
+      ORDER BY a.id ASC
+    `).all(lastReadId) as any[];
+    const pending = announcements.length > 0;
 
-    return res.json({ pending, announcement: pending ? latest : null });
+    return res.json({
+      pending,
+      announcements,
+      pending_count: announcements.length,
+      announcement: pending ? announcements[0] : null
+    });
+  });
+
+  app.get('/api/announcements/history', authenticate, (req: any, res: any) => {
+    const userRow = db.prepare('SELECT role, last_read_announcement_id FROM users WHERE id = ?').get(req.user.id) as any;
+    if (!userRow) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    const lastReadId = Number(userRow?.last_read_announcement_id || 0);
+    const rows = db.prepare(`
+      SELECT a.*, u.username AS created_by_username
+      FROM announcements a
+      LEFT JOIN users u ON u.id = a.created_by
+      ORDER BY a.id DESC
+    `).all() as any[];
+
+    const data = rows.map((item) => ({
+      ...item,
+      is_read: Number(item?.id || 0) <= lastReadId
+    }));
+
+    return res.json({
+      announcements: data,
+      unread_count: data.filter((item) => !item.is_read).length
+    });
   });
 
   app.post('/api/announcements/ack', authenticate, (req: any, res: any) => {
