@@ -20,6 +20,10 @@ const MAX_PLAN_GENERATIONS = Math.max(0, Number(process.env.MAX_PLAN_GENERATIONS
 const MAX_PLAN_ADJUSTMENTS = Math.max(0, Number(process.env.MAX_PLAN_ADJUSTMENTS || 3));
 const COURSE_START_UTC8_MS = Date.UTC(2026, 2, 1, 16, 0, 0);
 const WEEKDAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+const toUtc8IsoString = (date: Date) => {
+  const utc8Ms = date.getTime() + 8 * 60 * 60 * 1000;
+  return new Date(utc8Ms).toISOString().replace('Z', '+08:00');
+};
 const getTodayKey = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -421,7 +425,7 @@ async function startServer() {
         should_remind: 0,
         reason: '当前暂无学习计划，暂不进行滞后提醒判定。',
         suggestion: '请先生成学习计划，然后系统会自动跟踪进度。',
-        checked_at: now.toISOString(),
+        checked_at: toUtc8IsoString(now),
         trigger_source: triggerSource,
         course_weekday: courseWeekday,
         plan_id: null,
@@ -450,7 +454,7 @@ async function startServer() {
 
     const { client, model } = getAiClient();
     const auditPrompt = prompts.progressAudit({
-      nowIso: now.toISOString(),
+      nowIso: toUtc8IsoString(now),
       courseWeekday,
       latestPlan: String(latestPlan?.plan_content || '无').slice(0, 6000),
       latestPlanUpdatedAt: latestPlan?.updated_at || latestPlan?.created_at || '未知',
@@ -484,7 +488,7 @@ async function startServer() {
       should_remind: shouldRemind ? 1 : 0,
       reason,
       suggestion,
-      checked_at: now.toISOString(),
+      checked_at: toUtc8IsoString(now),
       trigger_source: triggerSource,
       course_weekday: courseWeekday,
       plan_id: latestPlan?.id || null,
@@ -1157,7 +1161,7 @@ async function startServer() {
             should_remind: false,
             reason: err?.message || '检测失败',
             suggestion: '',
-            checked_at: new Date().toISOString(),
+            checked_at: toUtc8IsoString(new Date()),
             trigger_source: 'manual-admin',
             course_weekday: getCourseWeekdayLabel(new Date())
           };
@@ -1828,7 +1832,7 @@ async function startServer() {
           const hoursSinceUpdated = planUpdatedAt ? Math.max(0, Math.floor((now.getTime() - planUpdatedAt.getTime()) / 3600000)) : null;
           const courseWeekdayLabel = getCourseWeekdayLabel(now);
           const progressContext = [
-            `当前时间: ${now.toISOString()}`,
+            `当前时间: ${toUtc8IsoString(now)}`,
             `教学日历定位: ${courseWeekdayLabel}（按2026-03-02为第一周周一计算）`,
             `本次笔记提交序号: 第${noteVersion}次`,
             `本次笔记提交周次字段: ${week || '未知'}`,

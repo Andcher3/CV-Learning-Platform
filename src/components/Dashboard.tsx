@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, LogOut, FileText, CheckCircle, Library } from 'lucide-react';
+import { formatDateTimeCn } from '../utils/datetime';
 
 export default function Dashboard() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -161,6 +162,8 @@ export default function Dashboard() {
     }
   };
 
+  const formatDate = (value?: string | null) => formatDateTimeCn(value);
+
   return (
     <div className="min-h-screen bg-slate-50">
       <nav className="bg-white shadow-sm border-b border-slate-200">
@@ -240,13 +243,13 @@ export default function Dashboard() {
               <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                 {myFeedbacks.map((item: any) => (
                   <div key={item.id} className="rounded-lg border border-slate-200 p-3 bg-slate-50">
-                    <div className="text-xs text-slate-500">提交时间：{new Date(item.created_at).toLocaleString()}</div>
+                    <div className="text-xs text-slate-500">提交时间：{formatDate(item.created_at)}</div>
                     <div className="mt-1 text-sm text-slate-700 whitespace-pre-wrap">{item.content}</div>
                     {item.admin_reply ? (
                       <div className="mt-2 rounded-md border border-emerald-100 bg-emerald-50 p-2">
                         <div className="text-xs text-emerald-700 mb-1">
                           管理员回复{item.replied_by_username ? `（${item.replied_by_username}）` : ''}
-                          {item.replied_at ? ` · ${new Date(item.replied_at).toLocaleString()}` : ''}
+                          {item.replied_at ? ` · ${formatDate(item.replied_at)}` : ''}
                         </div>
                         <div className="text-sm text-emerald-800 whitespace-pre-wrap">{item.admin_reply}</div>
                       </div>
@@ -388,7 +391,7 @@ export default function Dashboard() {
           <div className="bg-white w-full max-w-lg rounded-2xl p-6 shadow-xl border border-rose-200">
             <h3 className="text-lg font-semibold text-rose-700 mb-2">学习进度提醒</h3>
             <p className="text-sm text-slate-600 mb-3">
-              检测时间：{progressReminder.checked_at ? new Date(progressReminder.checked_at).toLocaleString() : '-'}
+              检测时间：{formatDate(progressReminder.checked_at)}
               {progressReminder.course_weekday ? `（${progressReminder.course_weekday}）` : ''}
             </p>
             <div className="bg-rose-50 border border-rose-100 rounded-lg p-3 text-sm text-rose-700 mb-3">

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, CheckCircle, Clock, BookOpen, MessageSquare, Send, Paperclip, Link as LinkIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import SidebarAI from './SidebarAI';
 import { marked } from 'marked';
+import { formatDateTimeCn } from '../utils/datetime';
 
 const unwrapOuterMarkdownFence = (text: string) => {
   const raw = String(text || '').trim();
@@ -681,7 +682,7 @@ export default function UnitDetail() {
   const contextContentWithDisplayedPlan = `${contextContent}\n页面当前展示的计划版本：${displayedPlanLabel}\n页面当前展示的计划内容：${displayedPlanContent || '无'}\n`;
   const quizQuestions = Array.isArray(quizAssignment?.questions) ? quizAssignment.questions : [];
   const quizStatus = String(quizAssignment?.status || 'none');
-  const quizDeadlineText = quizAssignment?.expires_at ? new Date(quizAssignment.expires_at).toLocaleString() : '-';
+  const quizDeadlineText = formatDateTimeCn(quizAssignment?.expires_at);
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -965,7 +966,7 @@ export default function UnitDetail() {
               notes.map((note) => (
                 <div key={note.id} className="bg-slate-50 rounded-xl p-6 border border-slate-200">
                   <div className="text-sm text-slate-500 mb-3 flex items-center">
-                    <Clock className="w-4 h-4 mr-1" /> {new Date(note.created_at).toLocaleString()}
+                    <Clock className="w-4 h-4 mr-1" /> {formatDateTimeCn(note.created_at)}
                   </div>
                   <p className="text-slate-800 whitespace-pre-wrap mb-4">{note.content}</p>
 

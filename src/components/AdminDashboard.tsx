@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save, FileText, MessageSquare } from 'lucide-react';
 import { marked } from 'marked';
+import { formatDateTimeCn } from '../utils/datetime';
 
 const unwrapOuterMarkdownFence = (text: string) => {
   const raw = String(text || '').trim();
@@ -484,9 +485,7 @@ function AdminRecords() {
   }, []);
 
   const formatDate = (value?: string) => {
-    if (!value) return '-';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    return formatDateTimeCn(value);
   };
 
   return (
@@ -762,9 +761,7 @@ function AdminFeedbacks() {
   };
 
   const formatDate = (value?: string) => {
-    if (!value) return '-';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    return formatDateTimeCn(value);
   };
 
   return (
@@ -890,9 +887,7 @@ function AdminQuizzes() {
   }, []);
 
   const formatDate = (value?: string) => {
-    if (!value) return '-';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    return formatDateTimeCn(value);
   };
 
   const handleAssign = async () => {
