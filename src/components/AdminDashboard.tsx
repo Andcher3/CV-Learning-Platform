@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, Settings, ArrowLeft, Plus, Edit, Trash2, Save, FileText, MessageSquare } from 'lucide-react';
 import { marked } from 'marked';
@@ -40,6 +40,38 @@ const renderMarkdownHtml = (text: string) => {
   const unwrapped = unwrapOuterMarkdownFence(text || '');
   const normalized = normalizeBareUrlBoundaries(unwrapped);
   return marked.parse(normalized);
+};
+
+type SortDirection = 'asc' | 'desc';
+
+const normalizeSortValue = (value: any) => {
+  if (value == null) return '';
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'number') return value;
+  const raw = String(value).trim();
+  if (!raw) return '';
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) return numeric;
+  const time = Date.parse(raw);
+  if (!Number.isNaN(time)) return time;
+  return raw.toLowerCase();
+};
+
+const compareSortValues = (left: any, right: any) => {
+  const a = normalizeSortValue(left);
+  const b = normalizeSortValue(right);
+  if (a === b) return 0;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).localeCompare(String(b), 'zh-CN');
+};
+
+const sortRows = <T,>(rows: T[], getter: (row: T) => any, direction: SortDirection) => {
+  const list = [...rows];
+  list.sort((a, b) => {
+    const delta = compareSortValues(getter(a), getter(b));
+    return direction === 'asc' ? delta : -delta;
+  });
+  return list;
 };
 
 export default function AdminDashboard() {
@@ -111,6 +143,8 @@ export default function AdminDashboard() {
 function UsersManagement() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [users, setUsers] = useState<any[]>([]);
+  const [userSortKey, setUserSortKey] = useState<'id' | 'username' | 'role'>('id');
+  const [userSortDirection, setUserSortDirection] = useState<SortDirection>('asc');
   const [editingUser, setEditingUser] = useState<any>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState({ username: '', password: '', role: 'student' });
@@ -191,6 +225,10 @@ function UsersManagement() {
     }
   };
 
+  const sortedUsers = useMemo(() => {
+    return sortRows(users, (row) => row?.[userSortKey], userSortDirection);
+  }, [users, userSortDirection, userSortKey]);
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
@@ -251,6 +289,26 @@ function UsersManagement() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="px-6 py-3 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+          <span className="text-xs text-slate-500">排序</span>
+          <select
+            value={userSortKey}
+            onChange={(e) => setUserSortKey(e.target.value as 'id' | 'username' | 'role')}
+            className="border border-slate-300 rounded px-2 py-1 text-sm"
+          >
+            <option value="id">ID</option>
+            <option value="username">账号</option>
+            <option value="role">角色</option>
+          </select>
+          <select
+            value={userSortDirection}
+            onChange={(e) => setUserSortDirection(e.target.value as SortDirection)}
+            className="border border-slate-300 rounded px-2 py-1 text-sm"
+          >
+            <option value="asc">升序</option>
+            <option value="desc">降序</option>
+          </select>
+        </div>
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
@@ -261,7 +319,7 @@ function UsersManagement() {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-slate-200">
-            {users.map(user => (
+            {sortedUsers.map(user => (
               <tr key={user.id}>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{user.id}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{user.username}</td>
@@ -317,10 +375,22 @@ function AdminRecords() {
   const [notes, setNotes] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [progressRows, setProgressRows] = useState<any[]>([]);
+  const [units, setUnits] = useState<any[]>([]);
+  const [selectedUnitId, setSelectedUnitId] = useState('');
+  const [unitScores, setUnitScores] = useState<any[]>([]);
+  const [unitScoresLoading, setUnitScoresLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [checkingProgress, setCheckingProgress] = useState(false);
   const [checkingStudentId, setCheckingStudentId] = useState<number | null>(null);
   const [progressMessage, setProgressMessage] = useState('');
+  const [progressSortKey, setProgressSortKey] = useState<'student_id' | 'student_username' | 'status' | 'lag_days' | 'should_remind' | 'checked_at'>('lag_days');
+  const [progressSortDirection, setProgressSortDirection] = useState<SortDirection>('desc');
+  const [noteSortKey, setNoteSortKey] = useState<'student_id' | 'student_username' | 'unit_title' | 'created_at' | 'grade'>('created_at');
+  const [noteSortDirection, setNoteSortDirection] = useState<SortDirection>('desc');
+  const [planSortKey, setPlanSortKey] = useState<'student_id' | 'student_username' | 'unit_title' | 'updated_at'>('updated_at');
+  const [planSortDirection, setPlanSortDirection] = useState<SortDirection>('desc');
+  const [scoreSortKey, setScoreSortKey] = useState<'student_id' | 'student_username' | 'final_grade' | 'latest_note_created_at' | 'has_plan'>('student_id');
+  const [scoreSortDirection, setScoreSortDirection] = useState<SortDirection>('asc');
 
   const resolveFileUrl = (fileUrl: string | null) => {
     if (!fileUrl) return '';
@@ -336,19 +406,52 @@ function AdminRecords() {
     return single ? [single] : [];
   };
 
-  const loadData = () => {
+  const loadUnitScores = async (unitId: string) => {
+    if (!unitId) {
+      setUnitScores([]);
+      return;
+    }
+    setUnitScoresLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/unit-scores?unitId=${unitId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '单元成绩加载失败');
+      }
+      setUnitScores(Array.isArray(data?.rows) ? data.rows : []);
+    } catch (err: any) {
+      setProgressMessage(err?.message || '单元成绩加载失败');
+      setUnitScores([]);
+    } finally {
+      setUnitScoresLoading(false);
+    }
+  };
+
+  const loadData = async () => {
     setLoading(true);
-    Promise.all([
-      fetch(`${API_BASE_URL}/api/admin/notes`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json()),
-      fetch(`${API_BASE_URL}/api/admin/plans`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json()),
-      fetch(`${API_BASE_URL}/api/admin/progress`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json())
-    ])
-      .then(([notesData, plansData, progressData]) => {
-        setNotes(notesData);
-        setPlans(plansData);
-        setProgressRows(Array.isArray(progressData) ? progressData : []);
-      })
-      .finally(() => setLoading(false));
+    try {
+      const [notesData, plansData, progressData, unitsData] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/admin/notes`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json()),
+        fetch(`${API_BASE_URL}/api/admin/plans`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json()),
+        fetch(`${API_BASE_URL}/api/admin/progress`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json()),
+        fetch(`${API_BASE_URL}/api/units`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json())
+      ]);
+      setNotes(Array.isArray(notesData) ? notesData : []);
+      setPlans(Array.isArray(plansData) ? plansData : []);
+      setProgressRows(Array.isArray(progressData) ? progressData : []);
+
+      const unitList = Array.isArray(unitsData) ? unitsData : [];
+      setUnits(unitList);
+      const preferredUnitId = selectedUnitId || (unitList[0] ? String(unitList[0].id) : '');
+      if (preferredUnitId && preferredUnitId !== selectedUnitId) {
+        setSelectedUnitId(preferredUnitId);
+      }
+      await loadUnitScores(preferredUnitId);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCheckAllProgress = async () => {
@@ -481,8 +584,29 @@ function AdminRecords() {
   };
 
   useEffect(() => {
-    loadData();
+    loadData().catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (!selectedUnitId) return;
+    loadUnitScores(selectedUnitId).catch(console.error);
+  }, [selectedUnitId]);
+
+  const sortedProgressRows = useMemo(() => {
+    return sortRows(progressRows, (item) => item?.[progressSortKey], progressSortDirection);
+  }, [progressRows, progressSortDirection, progressSortKey]);
+
+  const sortedNotes = useMemo(() => {
+    return sortRows(notes, (item) => item?.[noteSortKey], noteSortDirection);
+  }, [noteSortDirection, noteSortKey, notes]);
+
+  const sortedPlans = useMemo(() => {
+    return sortRows(plans, (item) => item?.[planSortKey], planSortDirection);
+  }, [planSortDirection, planSortKey, plans]);
+
+  const sortedUnitScores = useMemo(() => {
+    return sortRows(unitScores, (item) => item?.[scoreSortKey], scoreSortDirection);
+  }, [scoreSortDirection, scoreSortKey, unitScores]);
 
   const formatDate = (value?: string) => {
     return formatDateTimeCn(value);
@@ -513,10 +637,115 @@ function AdminRecords() {
       ) : (
         <>
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">单元最终分数总览</h3>
+                <p className="text-sm text-slate-500">按单元查看每位学生最终分数（以该单元最后一次笔记成绩为准）。</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">单元</span>
+                <select
+                  value={selectedUnitId}
+                  onChange={(e) => setSelectedUnitId(e.target.value)}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="">请选择单元</option>
+                  {units.map((unit: any) => (
+                    <option key={unit.id} value={unit.id}>{unit.title}</option>
+                  ))}
+                </select>
+                <span className="text-xs text-slate-500">排序</span>
+                <select
+                  value={scoreSortKey}
+                  onChange={(e) => setScoreSortKey(e.target.value as 'student_id' | 'student_username' | 'final_grade' | 'latest_note_created_at' | 'has_plan')}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="student_id">学生ID</option>
+                  <option value="student_username">账号</option>
+                  <option value="final_grade">分数</option>
+                  <option value="latest_note_created_at">最近提交时间</option>
+                  <option value="has_plan">计划有无</option>
+                </select>
+                <select
+                  value={scoreSortDirection}
+                  onChange={(e) => setScoreSortDirection(e.target.value as SortDirection)}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="asc">升序</option>
+                  <option value="desc">降序</option>
+                </select>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学生ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">账号</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">最终分数</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">最近提交时间</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学习计划</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-slate-200">
+                  {unitScoresLoading ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-6 text-center text-slate-500">成绩加载中...</td>
+                    </tr>
+                  ) : sortedUnitScores.length > 0 ? (
+                    sortedUnitScores.map((row: any) => (
+                      <tr key={`${row.student_id}-${selectedUnitId}`}>
+                        <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{row.student_id}</td>
+                        <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{row.student_username}</td>
+                        <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{row.final_grade ?? '-'}</td>
+                        <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(row.latest_note_created_at)}</td>
+                        <td className="px-4 py-3 text-sm whitespace-nowrap">
+                          {row.has_plan ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">有</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">无</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-6 text-center text-slate-500">暂无该单元成绩数据</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">学生进度滞后检测</h3>
                 <p className="text-sm text-slate-500">展示每位学生最新一次进度评估结果。</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">排序</span>
+                <select
+                  value={progressSortKey}
+                  onChange={(e) => setProgressSortKey(e.target.value as 'student_id' | 'student_username' | 'status' | 'lag_days' | 'should_remind' | 'checked_at')}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="student_id">学生ID</option>
+                  <option value="student_username">账号</option>
+                  <option value="status">状态</option>
+                  <option value="lag_days">滞后天数</option>
+                  <option value="should_remind">提醒</option>
+                  <option value="checked_at">检测时间</option>
+                </select>
+                <select
+                  value={progressSortDirection}
+                  onChange={(e) => setProgressSortDirection(e.target.value as SortDirection)}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="asc">升序</option>
+                  <option value="desc">降序</option>
+                </select>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -534,7 +763,7 @@ function AdminRecords() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-200">
-                  {progressRows.map((item: any, idx: number) => (
+                  {sortedProgressRows.map((item: any, idx: number) => (
                     <tr key={`${item.student_id}-${idx}`}>
                       <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{item.student_id ?? '-'}</td>
                       <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{item.student_username || item.student_id}</td>
@@ -560,7 +789,7 @@ function AdminRecords() {
                       </td>
                     </tr>
                   ))}
-                  {progressRows.length === 0 && (
+                  {sortedProgressRows.length === 0 && (
                     <tr>
                       <td colSpan={8} className="px-4 py-6 text-center text-slate-500">暂无进度检测结果</td>
                     </tr>
@@ -575,6 +804,28 @@ function AdminRecords() {
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">学习笔记</h3>
                 <p className="text-sm text-slate-500">查看全部学生的笔记内容、附件与评分。</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">排序</span>
+                <select
+                  value={noteSortKey}
+                  onChange={(e) => setNoteSortKey(e.target.value as 'student_id' | 'student_username' | 'unit_title' | 'created_at' | 'grade')}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="student_id">学生ID</option>
+                  <option value="student_username">账号</option>
+                  <option value="unit_title">单元</option>
+                  <option value="created_at">提交时间</option>
+                  <option value="grade">评分</option>
+                </select>
+                <select
+                  value={noteSortDirection}
+                  onChange={(e) => setNoteSortDirection(e.target.value as SortDirection)}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="asc">升序</option>
+                  <option value="desc">降序</option>
+                </select>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -592,7 +843,7 @@ function AdminRecords() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-200">
-                  {notes.map((note: any) => (
+                  {sortedNotes.map((note: any) => (
                     <tr key={note.id}>
                       <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{note.student_id ?? '-'}</td>
                       <td className="px-4 py-3 text-sm text-slate-800">{note.student_username}</td>
@@ -618,7 +869,7 @@ function AdminRecords() {
                       </td>
                     </tr>
                   ))}
-                  {notes.length === 0 && (
+                  {sortedNotes.length === 0 && (
                     <tr>
                       <td colSpan={8} className="px-4 py-6 text-center text-slate-500">暂无笔记记录</td>
                     </tr>
@@ -634,6 +885,27 @@ function AdminRecords() {
                 <h3 className="text-lg font-semibold text-slate-900">学习计划</h3>
                 <p className="text-sm text-slate-500">按更新时间查看所有学生的学习计划。</p>
               </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">排序</span>
+                <select
+                  value={planSortKey}
+                  onChange={(e) => setPlanSortKey(e.target.value as 'student_id' | 'student_username' | 'unit_title' | 'updated_at')}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="student_id">学生ID</option>
+                  <option value="student_username">账号</option>
+                  <option value="unit_title">单元</option>
+                  <option value="updated_at">更新时间</option>
+                </select>
+                <select
+                  value={planSortDirection}
+                  onChange={(e) => setPlanSortDirection(e.target.value as SortDirection)}
+                  className="border border-slate-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value="asc">升序</option>
+                  <option value="desc">降序</option>
+                </select>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-slate-200">
@@ -647,7 +919,7 @@ function AdminRecords() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-200">
-                  {plans.map((plan: any) => (
+                  {sortedPlans.map((plan: any) => (
                     <tr key={plan.id}>
                       <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{plan.student_id ?? '-'}</td>
                       <td className="px-4 py-3 text-sm text-slate-800">{plan.student_username}</td>
@@ -674,7 +946,7 @@ function AdminRecords() {
                       </td>
                     </tr>
                   ))}
-                  {plans.length === 0 && (
+                  {sortedPlans.length === 0 && (
                     <tr>
                       <td colSpan={5} className="px-4 py-6 text-center text-slate-500">暂无学习计划</td>
                     </tr>
@@ -692,6 +964,8 @@ function AdminRecords() {
 function AdminFeedbacks() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
+  const [feedbackSortKey, setFeedbackSortKey] = useState<'student_username' | 'created_at' | 'replied_at'>('created_at');
+  const [feedbackSortDirection, setFeedbackSortDirection] = useState<SortDirection>('desc');
   const [loading, setLoading] = useState(true);
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [savingReplyId, setSavingReplyId] = useState<number | null>(null);
@@ -764,6 +1038,10 @@ function AdminFeedbacks() {
     return formatDateTimeCn(value);
   };
 
+  const sortedFeedbacks = useMemo(() => {
+    return sortRows(feedbacks, (item) => item?.[feedbackSortKey], feedbackSortDirection);
+  }, [feedbackSortDirection, feedbackSortKey, feedbacks]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -781,6 +1059,26 @@ function AdminFeedbacks() {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 text-slate-500">加载中...</div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+            <span className="text-xs text-slate-500">排序</span>
+            <select
+              value={feedbackSortKey}
+              onChange={(e) => setFeedbackSortKey(e.target.value as 'student_username' | 'created_at' | 'replied_at')}
+              className="border border-slate-300 rounded px-2 py-1 text-sm"
+            >
+              <option value="student_username">学生账号</option>
+              <option value="created_at">提交时间</option>
+              <option value="replied_at">回复时间</option>
+            </select>
+            <select
+              value={feedbackSortDirection}
+              onChange={(e) => setFeedbackSortDirection(e.target.value as SortDirection)}
+              className="border border-slate-300 rounded px-2 py-1 text-sm"
+            >
+              <option value="asc">升序</option>
+              <option value="desc">降序</option>
+            </select>
+          </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
@@ -792,7 +1090,7 @@ function AdminFeedbacks() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
-                {feedbacks.map((item: any) => (
+                {sortedFeedbacks.map((item: any) => (
                   <tr key={item.id}>
                     <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{item.student_username}</td>
                     <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.created_at)}</td>
@@ -825,7 +1123,7 @@ function AdminFeedbacks() {
                     </td>
                   </tr>
                 ))}
-                {feedbacks.length === 0 && (
+                {sortedFeedbacks.length === 0 && (
                   <tr>
                     <td colSpan={4} className="px-4 py-6 text-center text-slate-500">暂无学生反馈</td>
                   </tr>
@@ -849,6 +1147,8 @@ function AdminQuizzes() {
   const [studentId, setStudentId] = useState('');
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [quizSortKey, setQuizSortKey] = useState<'id' | 'unit_title' | 'student_username' | 'status' | 'score' | 'created_at' | 'expires_at'>('created_at');
+  const [quizSortDirection, setQuizSortDirection] = useState<SortDirection>('desc');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -889,6 +1189,10 @@ function AdminQuizzes() {
   const formatDate = (value?: string) => {
     return formatDateTimeCn(value);
   };
+
+  const sortedQuizRecords = useMemo(() => {
+    return sortRows(records, (item) => item?.[quizSortKey], quizSortDirection);
+  }, [quizSortDirection, quizSortKey, records]);
 
   const handleAssign = async () => {
     setMessage('');
@@ -992,6 +1296,30 @@ function AdminQuizzes() {
         <div className="px-6 py-4 border-b border-slate-200">
           <h3 className="text-lg font-semibold text-slate-900">测试记录与成绩</h3>
         </div>
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+          <span className="text-xs text-slate-500">排序</span>
+          <select
+            value={quizSortKey}
+            onChange={(e) => setQuizSortKey(e.target.value as 'id' | 'unit_title' | 'student_username' | 'status' | 'score' | 'created_at' | 'expires_at')}
+            className="border border-slate-300 rounded px-2 py-1 text-sm"
+          >
+            <option value="id">ID</option>
+            <option value="unit_title">单元</option>
+            <option value="student_username">学生账号</option>
+            <option value="status">状态</option>
+            <option value="score">分数</option>
+            <option value="created_at">发放时间</option>
+            <option value="expires_at">截止时间</option>
+          </select>
+          <select
+            value={quizSortDirection}
+            onChange={(e) => setQuizSortDirection(e.target.value as SortDirection)}
+            className="border border-slate-300 rounded px-2 py-1 text-sm"
+          >
+            <option value="asc">升序</option>
+            <option value="desc">降序</option>
+          </select>
+        </div>
         {loading ? (
           <div className="p-6 text-slate-500">加载中...</div>
         ) : (
@@ -1010,7 +1338,7 @@ function AdminQuizzes() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
-                {records.map((item: any) => (
+                {sortedQuizRecords.map((item: any) => (
                   <tr key={item.id}>
                     <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{item.id}</td>
                     <td className="px-4 py-3 text-sm text-slate-800 whitespace-nowrap">{item.unit_title}</td>
@@ -1030,7 +1358,7 @@ function AdminQuizzes() {
                     <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.expires_at)}</td>
                   </tr>
                 ))}
-                {records.length === 0 && (
+                {sortedQuizRecords.length === 0 && (
                   <tr>
                     <td colSpan={8} className="px-4 py-6 text-center text-slate-500">暂无测试记录</td>
                   </tr>

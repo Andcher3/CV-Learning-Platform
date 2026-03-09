@@ -742,6 +742,63 @@ async function startServer() {
     res.json(plans);
   });
 
+  app.get('/api/admin/unit-scores', authenticate, requireAdmin, (req: any, res: any) => {
+    const unitId = Number(req.query?.unitId);
+    if (!Number.isFinite(unitId) || unitId <= 0) {
+      return res.status(400).json({ error: '无效的单元ID' });
+    }
+
+    const unit = db.prepare('SELECT id, title FROM units WHERE id = ?').get(unitId) as any;
+    if (!unit) {
+      return res.status(404).json({ error: '单元不存在' });
+    }
+
+    const rows = db.prepare(`
+      SELECT
+        u.id AS student_id,
+        u.username AS student_username,
+        (
+          SELECT n.id
+          FROM notes n
+          WHERE n.student_id = u.id AND n.unit_id = ?
+          ORDER BY n.created_at DESC, n.id DESC
+          LIMIT 1
+        ) AS latest_note_id,
+        (
+          SELECT n.grade
+          FROM notes n
+          WHERE n.student_id = u.id AND n.unit_id = ?
+          ORDER BY n.created_at DESC, n.id DESC
+          LIMIT 1
+        ) AS final_grade,
+        (
+          SELECT n.created_at
+          FROM notes n
+          WHERE n.student_id = u.id AND n.unit_id = ?
+          ORDER BY n.created_at DESC, n.id DESC
+          LIMIT 1
+        ) AS latest_note_created_at,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM study_plans p WHERE p.student_id = u.id AND p.unit_id = ?
+        ) THEN 1 ELSE 0 END AS has_plan
+      FROM users u
+      WHERE u.role = 'student'
+      ORDER BY u.id ASC
+    `).all(unitId, unitId, unitId, unitId) as any[];
+
+    const data = rows.map((row) => ({
+      ...row,
+      has_plan: Number(row.has_plan || 0) === 1,
+      final_grade: row.final_grade == null || String(row.final_grade).trim() === '' ? null : Number(row.final_grade)
+    }));
+
+    res.json({
+      unit_id: unit.id,
+      unit_title: unit.title,
+      rows: data
+    });
+  });
+
   app.get('/api/admin/feedbacks', authenticate, requireAdmin, (req: any, res: any) => {
     const feedbacks = db.prepare(`
       SELECT f.*, u.username AS student_username, ru.username AS replied_by_username
