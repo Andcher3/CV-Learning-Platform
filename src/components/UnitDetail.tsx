@@ -4,6 +4,7 @@ import { ArrowLeft, FileText, CheckCircle, Clock, BookOpen, MessageSquare, Send,
 import SidebarAI from './SidebarAI';
 import { marked } from 'marked';
 import { formatDateTimeCn } from '../utils/datetime';
+import { clearAuthSession, fetchJsonWithAutoRefresh, fetchWithAutoRefresh, getAccessToken, getAuthExpiredMarker } from '../utils/auth';
 
 const NOTE_ALLOWED_EXTENSIONS = [
   '.md', '.txt', '.pdf', '.ipynb', '.py', '.js', '.ts', '.tsx', '.json', '.yaml', '.yml', '.csv', '.html', '.css', '.java', '.cpp', '.c', '.go', '.sh',
@@ -153,6 +154,7 @@ export default function UnitDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+  const AUTH_EXPIRED_MARKER = getAuthExpiredMarker();
   const [unit, setUnit] = useState<any>(null);
   const [plan, setPlan] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
@@ -182,6 +184,7 @@ export default function UnitDetail() {
   const [quizMessage, setQuizMessage] = useState('');
   const [quizSubmitting, setQuizSubmitting] = useState(false);
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
+  const [pageError, setPageError] = useState('');
   const [planHistory, setPlanHistory] = useState<any[]>([]);
   const [planViewIndex, setPlanViewIndex] = useState(0);
   const planVersions = useMemo(() => {
@@ -206,14 +209,39 @@ export default function UnitDetail() {
   const renderedPlan = useMemo(() => optimizePlanTablesLayout(renderMarkdownHtml(displayedPlanContent)), [displayedPlanContent]);
   const renderedPretestQuestion = useMemo(() => marked.parse(pretestQuestion || ''), [pretestQuestion]);
 
-  const loadPlanHistory = async (token: string) => {
-    const res = await fetch(`${API_BASE_URL}/api/plans/history/${id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data?.error || '计划历史加载失败');
+  const clearAuthAndRedirect = () => {
+    clearAuthSession();
+    navigate('/login');
+  };
+
+  const readJsonSafely = async (res: Response) => {
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return await res.json();
     }
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch (err) {
+      return { error: text || '服务器响应格式异常' };
+    }
+  };
+
+  const fetchJsonWithAuth = async (url: string, _token: string, init?: RequestInit) => {
+    try {
+      return await fetchJsonWithAutoRefresh(url, init);
+    } catch (err: any) {
+      if (err?.message === AUTH_EXPIRED_MARKER) {
+        clearAuthAndRedirect();
+      }
+      throw err;
+    }
+  };
+
+  const isAuthExpiredError = (err: any) => err?.message === AUTH_EXPIRED_MARKER;
+
+  const loadPlanHistory = async (token: string) => {
+    const data = await fetchJsonWithAuth(`${API_BASE_URL}/api/plans/history/${id}`, token);
     setPlanHistory(Array.isArray(data?.history) ? data.history : []);
   };
 
@@ -293,48 +321,59 @@ export default function UnitDetail() {
   };
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     if (!token) {
       navigate('/login');
       return;
     }
 
-    fetch(`${API_BASE_URL}/api/units/${id}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => setUnit(data));
+    let cancelled = false;
+    const loadPage = async () => {
+      setPageError('');
+      setQuizLoading(true);
+      setQuizError('');
+      try {
+        const [unitData, planData, notesData, quizData] = await Promise.all([
+          fetchJsonWithAuth(`${API_BASE_URL}/api/units/${id}`, token),
+          fetchJsonWithAuth(`${API_BASE_URL}/api/plans/${id}`, token),
+          fetchJsonWithAuth(`${API_BASE_URL}/api/notes/${id}`, token),
+          fetchJsonWithAuth(`${API_BASE_URL}/api/quiz/unit/${id}`, token),
+        ]);
 
-    fetch(`${API_BASE_URL}/api/plans/${id}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => setPlan(data));
+        if (cancelled) return;
+        setUnit(unitData);
+        setPlan(planData);
+        setNotes(Array.isArray(notesData) ? notesData : []);
+        setQuizAssignment(quizData);
+        setQuizAnswers(quizData?.student_answers && typeof quizData.student_answers === 'object' ? quizData.student_answers : {});
 
-    loadPlanHistory(token).catch(console.error);
+        await loadPlanHistory(token);
+      } catch (err: any) {
+        if (cancelled) return;
+        if (err?.message === AUTH_EXPIRED_MARKER) return;
+        setPageError(err?.message || '页面数据加载失败，请稍后重试');
+      } finally {
+        if (!cancelled) setQuizLoading(false);
+      }
+    };
 
-    fetch(`${API_BASE_URL}/api/notes/${id}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => setNotes(data));
-
-    setQuizLoading(true);
-    fetch(`${API_BASE_URL}/api/quiz/unit/${id}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => {
-        setQuizAssignment(data);
-        setQuizAnswers(data?.student_answers && typeof data.student_answers === 'object' ? data.student_answers : {});
-      })
-      .catch(() => setQuizError('测试数据加载失败'))
-      .finally(() => setQuizLoading(false));
+    loadPage();
+    return () => {
+      cancelled = true;
+    };
   }, [id, navigate]);
 
   const loadQuizAssignment = async () => {
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     if (!token) return;
     setQuizLoading(true);
     setQuizError('');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/quiz/unit/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
+      const data = await fetchJsonWithAuth(`${API_BASE_URL}/api/quiz/unit/${id}`, token);
       setQuizAssignment(data);
       setQuizAnswers(data?.student_answers && typeof data.student_answers === 'object' ? data.student_answers : {});
     } catch (err: any) {
+      if (err?.message === AUTH_EXPIRED_MARKER) return;
       setQuizError(err?.message || '测试数据加载失败');
     } finally {
       setQuizLoading(false);
@@ -354,22 +393,21 @@ export default function UnitDetail() {
     setQuizError('');
     setQuizMessage('');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE_URL}/api/quiz/${quizAssignment.id}/submit`, {
+      const res = await fetchWithAutoRefresh(`${API_BASE_URL}/api/quiz/${quizAssignment.id}/submit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ answers: quizAnswers })
       });
-      const data = await res.json();
+      const data = await readJsonSafely(res);
       if (!res.ok) {
         throw new Error(data?.error || '提交失败');
       }
       setQuizMessage(`提交成功，得分 ${data?.score ?? 0} 分（${data?.correct_count ?? 0}/${data?.total_questions ?? 0}）`);
       await loadQuizAssignment();
     } catch (err: any) {
+      if (isAuthExpiredError(err)) return;
       setQuizError(err?.message || '提交失败');
     } finally {
       setQuizSubmitting(false);
@@ -381,14 +419,13 @@ export default function UnitDetail() {
     setPlanActionError('');
     setPlanActionMessage('');
     setPlanStreamStatus('正在初始化生成任务...');
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     try {
-      const res = await fetch(`${API_BASE_URL}/api/plans/generate?stream=1`, {
+      const res = await fetchWithAutoRefresh(`${API_BASE_URL}/api/plans/generate?stream=1`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'text/event-stream',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
           unitId: id,
@@ -444,6 +481,10 @@ export default function UnitDetail() {
       }
     } catch (err) {
       console.error(err);
+      if (isAuthExpiredError(err)) {
+        clearAuthAndRedirect();
+        return;
+      }
       setPlanActionError(err instanceof Error ? err.message : '学习计划生成失败');
       throw err;
     } finally {
@@ -464,21 +505,19 @@ export default function UnitDetail() {
     setLoadingPretest(true);
     setPlanActionError('');
     setPlanActionMessage('');
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     try {
-      const res = await fetch(`${API_BASE_URL}/api/plans/pretest/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || '无法加载测评题');
-      }
+      const data = await fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/plans/pretest/${id}`);
 
       setPretestQuestion(data?.question || '');
       setPretestAnswer('');
       setShowPretestModal(true);
     } catch (err) {
       console.error(err);
+      if (isAuthExpiredError(err)) {
+        clearAuthAndRedirect();
+        return;
+      }
       setPlanActionError(err instanceof Error ? err.message : '无法加载测评题');
     } finally {
       setLoadingPretest(false);
@@ -518,7 +557,7 @@ export default function UnitDetail() {
     setNoteStreamStatus('正在上传并保存笔记...');
     setPlanActionError('');
     setPlanActionMessage('');
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     try {
       const formData = new FormData();
       formData.append('unitId', id!);
@@ -528,11 +567,10 @@ export default function UnitDetail() {
         formData.append('files', file);
       }
 
-      const noteRes = await fetch(`${API_BASE_URL}/api/notes?stream=1`, {
+      const noteRes = await fetchWithAutoRefresh(`${API_BASE_URL}/api/notes?stream=1`, {
         method: 'POST',
         headers: {
           Accept: 'text/event-stream',
-          Authorization: `Bearer ${token}`
         },
         body: formData,
       });
@@ -586,19 +624,27 @@ export default function UnitDetail() {
       if (fileInputRef.current) fileInputRef.current.value = '';
       
       // Refresh notes and plan
-      fetch(`${API_BASE_URL}/api/notes/${id}`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(res => res.json())
-        .then(data => setNotes(data));
-      fetch(`${API_BASE_URL}/api/plans/${id}`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(res => res.json())
-        .then(data => {
-          setPlan(data);
+      if (token) {
+        try {
+          const [notesData, planData] = await Promise.all([
+            fetchJsonWithAuth(`${API_BASE_URL}/api/notes/${id}`, token),
+            fetchJsonWithAuth(`${API_BASE_URL}/api/plans/${id}`, token),
+          ]);
+          setNotes(Array.isArray(notesData) ? notesData : []);
+          setPlan(planData);
           setPlanViewIndex(0);
-        });
-      loadPlanHistory(token).catch(console.error);
+          await loadPlanHistory(token);
+        } catch (refreshErr: any) {
+          if (!isAuthExpiredError(refreshErr)) {
+            console.error(refreshErr);
+          }
+        }
+      }
     } catch (err) {
       console.error(err);
-      setPlanActionError(err instanceof Error ? err.message : '笔记提交失败');
+      if (!isAuthExpiredError(err)) {
+        setPlanActionError(err instanceof Error ? err.message : '笔记提交失败');
+      }
     } finally {
       setNoteStreamStatus('');
       setSubmittingNote(false);
@@ -609,13 +655,12 @@ export default function UnitDetail() {
     setGrading(true);
     setGradeActionError('');
     setGradeStreamStatus('评分请求已发送，正在准备中...');
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     try {
-      const res = await fetch(`${API_BASE_URL}/api/grade/${id}?stream=1`, {
+      const res = await fetchWithAutoRefresh(`${API_BASE_URL}/api/grade/${id}?stream=1`, {
         method: 'POST',
         headers: {
           Accept: 'text/event-stream',
-          Authorization: `Bearer ${token}`
         },
       });
 
@@ -652,18 +697,28 @@ export default function UnitDetail() {
       setGradeResult(gradeData);
       setGradeStreamStatus('评分完成');
       // Refresh notes to show grade
-      fetch(`${API_BASE_URL}/api/notes/${id}`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(res => res.json())
-        .then(data => setNotes(data));
+      if (token) {
+        try {
+          const notesData = await fetchJsonWithAuth(`${API_BASE_URL}/api/notes/${id}`, token);
+          setNotes(Array.isArray(notesData) ? notesData : []);
+        } catch (notesErr: any) {
+          if (!isAuthExpiredError(notesErr)) {
+            console.error(notesErr);
+          }
+        }
+      }
     } catch (err) {
       console.error(err);
-      setGradeActionError(err instanceof Error ? err.message : '评分失败');
+      if (!isAuthExpiredError(err)) {
+        setGradeActionError(err instanceof Error ? err.message : '评分失败');
+      }
     } finally {
       setGradeStreamStatus('');
       setGrading(false);
     }
   };
 
+  if (pageError) return <div className="p-8 text-center text-rose-600">{pageError}</div>;
   if (!unit) return <div className="p-8 text-center text-slate-500">加载中...</div>;
 
   let resources = [];
@@ -917,6 +972,9 @@ export default function UnitDetail() {
             <div className="text-sm text-slate-500 mb-2">
               今日计划自动调整次数：{adjustCount}/{maxAdjustCount}（今日剩余 {remainingAdjustCount} 次）
             </div>
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              提示：若附件包含较长代码段，建议同时提交 .md/.ipynb/.py 等文本代码文件（可与 Word 一起上传），可显著降低代码识别缺失风险。
+            </div>
             {submittingNote && noteStreamStatus && <div className="text-sm text-indigo-600 mb-2">{noteStreamStatus}</div>}
             <textarea
               value={newNote}
@@ -990,7 +1048,7 @@ export default function UnitDetail() {
             {notes.length === 0 ? (
               <p className="text-slate-500 text-center py-4">暂无笔记记录。</p>
             ) : (
-              notes.map((note) => (
+              (Array.isArray(notes) ? notes : []).map((note) => (
                 <div key={note.id} className="bg-slate-50 rounded-xl p-6 border border-slate-200">
                   <div className="text-sm text-slate-500 mb-3 flex items-center">
                     <Clock className="w-4 h-4 mr-1" /> {formatDateTimeCn(note.created_at)}

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
+import { saveAuthSession } from '../utils/auth';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -8,7 +9,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     try {
@@ -32,8 +33,7 @@ export default function Login() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '登录失败');
       
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
+      saveAuthSession(data);
       navigate('/dashboard');
     } catch (err: any) {
       setError(err.message || '网络错误，请检查服务器连接');

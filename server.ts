@@ -12,10 +12,12 @@ import { prompts } from './server/prompts';
 import { buildRandomQuizForUnit } from './server/quiz-utils';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
+const REFRESH_JWT_SECRET = process.env.REFRESH_JWT_SECRET || `${JWT_SECRET}_refresh`;
+const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN || '6h';
+const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '30d';
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const PLAN_DIR = path.join(DATA_DIR, 'plan');
 const NOTES_DIR = path.join(DATA_DIR, 'notes');
-const MAX_FILE_PREVIEW = 8000;
 const MAX_PLAN_GENERATIONS = Math.max(0, Number(process.env.MAX_PLAN_GENERATIONS || 3));
 const MAX_PLAN_ADJUSTMENTS = Math.max(0, Number(process.env.MAX_PLAN_ADJUSTMENTS || 3));
 const COURSE_START_UTC8_MS = Date.UTC(2026, 2, 1, 16, 0, 0);
@@ -36,6 +38,7 @@ const getTodayKey = () => {
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
 
 const getCourseWeekdayLabel = (date: Date) => {
   // COURSE_START_UTC8_MS already stores the UTC timestamp of 2026-03-02 00:00 (UTC+8).
@@ -97,6 +100,13 @@ const notesUpload = upload.fields([
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
+
+  const buildAuthPayload = (user: any) => {
+    const safeUser = { id: user.id, username: user.username, role: user.role };
+    const token = jwt.sign(safeUser, JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN as any });
+    const refreshToken = jwt.sign({ ...safeUser, type: 'refresh' }, REFRESH_JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN as any });
+    return { token, refreshToken, user: safeUser };
+  };
 
   app.use(cors()); // <--- 新增这一行
 
@@ -175,7 +185,7 @@ async function startServer() {
       const pdfParse = pdfParseModule?.default || pdfParseModule;
       const buffer = fs.readFileSync(resolvedPath);
       const parsed = await pdfParse(buffer);
-      return (parsed?.text || '').slice(0, MAX_FILE_PREVIEW);
+      return String(parsed?.text || '');
     } catch (err) {
       return '';
     }
@@ -190,13 +200,13 @@ async function startServer() {
       const contentResp: any = await client.files.content(uploaded.id);
       if (typeof contentResp?.text === 'function') {
         const text = await contentResp.text();
-        return (text || '').slice(0, MAX_FILE_PREVIEW);
+        return String(text || '');
       }
       if (typeof contentResp?.text === 'string') {
-        return contentResp.text.slice(0, MAX_FILE_PREVIEW);
+        return String(contentResp.text || '');
       }
       if (typeof contentResp === 'string') {
-        return contentResp.slice(0, MAX_FILE_PREVIEW);
+        return String(contentResp || '');
       }
       return '';
     } catch (err) {
@@ -268,9 +278,8 @@ async function startServer() {
           lines.push(`[Notebook Cell ${i + 1}]`);
           lines.push(sourceText);
         }
-        if (lines.join('\n').length >= MAX_FILE_PREVIEW) break;
       }
-      return lines.join('\n').slice(0, MAX_FILE_PREVIEW);
+      return lines.join('\n');
     } catch (err) {
       return '';
     }
@@ -288,8 +297,6 @@ async function startServer() {
     const uploadsRoot = path.resolve(uploadsDir);
     const notesRoot = path.resolve(NOTES_DIR);
     const allowedTextExt = new Set(['.md', '.txt', '.json', '.csv', '.yaml', '.yml', '.ipynb']);
-    const maxTextBytes = 512 * 1024; // inline text cap
-    const maxBinaryBytes = 20 * 1024 * 1024;
 
     for (const filePath of uniqueFiles) {
       const resolved = resolveFilePathFromToken(filePath);
@@ -300,7 +307,7 @@ async function startServer() {
       const ext = path.extname(resolved).toLowerCase();
       const stat = fs.statSync(resolved);
 
-      if (ext === '.ipynb' && stat.size <= maxTextBytes) {
+      if (ext === '.ipynb') {
         const notebookText = extractIpynbText(resolved);
         if (notebookText) {
           fileBlocks.push(`[文件: ${resolved}][Jupyter Notebook 提取]\n${notebookText}`);
@@ -309,8 +316,8 @@ async function startServer() {
         }
       }
 
-      if (allowedTextExt.has(ext) && stat.size <= maxTextBytes) {
-        const content = fs.readFileSync(resolved, 'utf-8').slice(0, MAX_FILE_PREVIEW);
+      if (allowedTextExt.has(ext)) {
+        const content = fs.readFileSync(resolved, 'utf-8');
         fileBlocks.push(`[文件: ${resolved}]\n${content}`);
         usedFiles.push(resolved);
         continue;
@@ -325,7 +332,7 @@ async function startServer() {
         }
       }
 
-      if (stat.size <= maxBinaryBytes && client) {
+      if (client) {
         const extractedText = await extractBinaryFileText(client, resolved);
         if (extractedText) {
           fileBlocks.push(`[文件: ${resolved}][提取文本]\n${extractedText}`);
@@ -1411,8 +1418,30 @@ async function startServer() {
     if (!user || !bcrypt.compareSync(password, user.password)) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+    res.json(buildAuthPayload(user));
+  });
+
+  app.post('/api/auth/refresh', (req, res) => {
+    const refreshToken = String(req.body?.refreshToken || '').trim();
+    if (!refreshToken) {
+      return res.status(401).json({ error: 'Refresh token is required' });
+    }
+
+    try {
+      const decoded = jwt.verify(refreshToken, REFRESH_JWT_SECRET) as any;
+      if (decoded?.type !== 'refresh') {
+        return res.status(401).json({ error: 'Invalid refresh token' });
+      }
+
+      const user = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(decoded.id) as any;
+      if (!user) {
+        return res.status(401).json({ error: 'User not found' });
+      }
+
+      res.json(buildAuthPayload(user));
+    } catch (err) {
+      res.status(401).json({ error: 'Refresh token expired' });
+    }
   });
 
   app.post('/api/auth/register', authenticate, (req: any, res: any) => {
@@ -2223,10 +2252,7 @@ async function startServer() {
       filesCount = files.length;
       sendSse('stage', { message: '评分提示词已构建，AI开始评分...' });
 
-      const gradePromptLimit = Number(process.env.AI_GRADE_PROMPT_CHAR_LIMIT || 12000);
-      const gradePrompt = prompt.length > gradePromptLimit
-        ? `${prompt.slice(0, gradePromptLimit)}\n\n[系统截断说明] 为避免超时，评分输入已按长度上限截断。`
-        : prompt;
+      const gradePrompt = prompt;
       const gradeMaxTokens = Number(process.env.AI_GRADE_MAX_TOKENS || 1800);
       const gradeRetryMaxTokens = Number(process.env.AI_GRADE_RETRY_MAX_TOKENS || 2600);
 

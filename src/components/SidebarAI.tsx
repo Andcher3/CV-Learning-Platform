@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from 'react';
 import { Send, Bot, ChevronRight, ChevronLeft } from 'lucide-react';
+import { fetchWithAutoRefresh, getAuthExpiredMarker } from '../utils/auth';
 
 export default function SidebarAI({
   context,
@@ -13,6 +14,7 @@ export default function SidebarAI({
   displayedPlanMeta?: string;
 }) {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+  const authExpiredMarker = getAuthExpiredMarker();
   const [isOpen, setIsOpen] = useState(() => {
     try {
       const raw = localStorage.getItem('sidebar_ai_open');
@@ -96,7 +98,7 @@ export default function SidebarAI({
     };
   }, [isResizing]);
 
-  const handleResizeStart = (event: React.MouseEvent<HTMLDivElement>) => {
+  const handleResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (!isOpen) return;
     resizeStartXRef.current = event.clientX;
     resizeStartWidthRef.current = sidebarWidth;
@@ -111,14 +113,12 @@ export default function SidebarAI({
     setLoading(true);
     setStreamStatus('正在思考中...');
 
-    const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/ai/chat?stream=1`, {
+      const res = await fetchWithAutoRefresh(`${API_BASE_URL}/api/ai/chat?stream=1`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'text/event-stream',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
           question: userMsg,
@@ -225,7 +225,11 @@ export default function SidebarAI({
       }
     } catch (err) {
       console.error(err);
-      setMessages((prev) => [...prev, { role: 'ai', content: '抱歉，我遇到了一些问题。' }]);
+      if ((err as any)?.message === authExpiredMarker) {
+        setMessages((prev) => [...prev, { role: 'ai', content: '登录状态已过期，请刷新页面后重新登录。' }]);
+      } else {
+        setMessages((prev) => [...prev, { role: 'ai', content: '抱歉，我遇到了一些问题。' }]);
+      }
     } finally {
       setStreamStatus('');
       setLoading(false);

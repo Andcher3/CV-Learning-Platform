@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, LogOut, FileText, CheckCircle, Library, Mail } from 'lucide-react';
 import { formatDateTimeCn } from '../utils/datetime';
+import { clearAuthSession, fetchJsonWithAutoRefresh, getAccessToken, getAuthExpiredMarker } from '../utils/auth';
 
 export default function Dashboard() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -31,47 +32,59 @@ export default function Dashboard() {
   const [showProgressReminder, setShowProgressReminder] = useState(false);
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const authExpiredMarker = getAuthExpiredMarker();
+
+  const redirectToLogin = () => {
+    clearAuthSession();
+    navigate('/login');
+  };
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     if (!token) {
       navigate('/login');
       return;
     }
 
-    fetch(`${API_BASE_URL}/api/units`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => res.json())
-      .then(data => setUnits(data))
-      .catch(console.error);
+    fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/units`)
+      .then(data => setUnits(Array.isArray(data) ? data : []))
+      .catch((err) => {
+        if (err?.message === authExpiredMarker) {
+          redirectToLogin();
+          return;
+        }
+        console.error(err);
+      });
 
     if (user.role === 'student') {
       setMyFeedbacksLoading(true);
-      fetch(`${API_BASE_URL}/api/feedback/mine`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-        .then(res => res.json())
+      fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/feedback/mine`)
         .then(data => setMyFeedbacks(Array.isArray(data) ? data : []))
-        .catch(console.error)
+        .catch((err) => {
+          if (err?.message === authExpiredMarker) {
+            redirectToLogin();
+            return;
+          }
+          console.error(err);
+        })
         .finally(() => setMyFeedbacksLoading(false));
 
-      fetch(`${API_BASE_URL}/api/progress/reminder`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-        .then(res => res.json())
+      fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/progress/reminder`)
         .then(data => {
           setProgressReminder(data);
           if (data?.should_remind) {
             setShowProgressReminder(true);
           }
         })
-        .catch(console.error);
+        .catch((err) => {
+          if (err?.message === authExpiredMarker) {
+            redirectToLogin();
+            return;
+          }
+          console.error(err);
+        });
 
-      fetch(`${API_BASE_URL}/api/announcements/pending`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-        .then(res => res.json())
+      fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/announcements/pending`)
         .then(data => {
           const queue = Array.isArray(data?.announcements) ? data.announcements : [];
           setAnnouncementUnreadCount(Number(data?.pending_count || queue.length || 0));
@@ -80,7 +93,13 @@ export default function Dashboard() {
             setShowAnnouncementModal(true);
           }
         })
-        .catch(console.error);
+        .catch((err) => {
+          if (err?.message === authExpiredMarker) {
+            redirectToLogin();
+            return;
+          }
+          console.error(err);
+        });
     }
   }, [navigate]);
 
@@ -89,15 +108,14 @@ export default function Dashboard() {
   const loadAnnouncementHistory = async () => {
     setAnnouncementHistoryLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE_URL}/api/announcements/history`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || '公告历史加载失败');
+      const data = await fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/announcements/history`);
       setAnnouncementHistory(Array.isArray(data?.announcements) ? data.announcements : []);
       setAnnouncementUnreadCount(Number(data?.unread_count || 0));
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.message === authExpiredMarker) {
+        redirectToLogin();
+        return;
+      }
       console.error(err);
     } finally {
       setAnnouncementHistoryLoading(false);
@@ -112,17 +130,13 @@ export default function Dashboard() {
     setAnnouncementAckLoading(true);
     setAnnouncementAckError('');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE_URL}/api/announcements/ack`, {
+      await fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/announcements/ack`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ announcementId: currentAnnouncement.id }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || '确认失败');
 
       setAnnouncementQueue((prev) => {
         const next = prev.slice(1);
@@ -134,6 +148,10 @@ export default function Dashboard() {
       });
       setAnnouncementAckError('');
     } catch (err: any) {
+      if (err?.message === authExpiredMarker) {
+        redirectToLogin();
+        return;
+      }
       setAnnouncementAckError(err?.message || '确认失败');
     } finally {
       setAnnouncementAckLoading(false);
@@ -141,12 +159,11 @@ export default function Dashboard() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    clearAuthSession();
     navigate('/login');
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
+  const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault();
     setPasswordError('');
     setPasswordMessage('');
@@ -166,37 +183,32 @@ export default function Dashboard() {
       return;
     }
 
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
     setPasswordLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
+      const data = await fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/auth/change-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ oldPassword, newPassword }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '修改密码失败');
 
       setPasswordMessage(data.message || '密码修改成功');
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
+      if (err?.message === authExpiredMarker) {
+        redirectToLogin();
+        return;
+      }
       setPasswordError(err.message || '修改密码失败');
     } finally {
       setPasswordLoading(false);
     }
   };
 
-  const handleSubmitFeedback = async (e: React.FormEvent) => {
+  const handleSubmitFeedback = async (e: FormEvent) => {
     e.preventDefault();
     setFeedbackError('');
     setFeedbackMessage('');
@@ -207,33 +219,25 @@ export default function Dashboard() {
       return;
     }
 
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
     setFeedbackLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/feedback`, {
+      const data = await fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/feedback`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ content }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '提交失败');
 
       setFeedbackMessage(data.message || '反馈提交成功');
       setFeedbackText('');
-      const listRes = await fetch(`${API_BASE_URL}/api/feedback/mine`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const listData = await listRes.json();
+      const listData = await fetchJsonWithAutoRefresh(`${API_BASE_URL}/api/feedback/mine`);
       setMyFeedbacks(Array.isArray(listData) ? listData : []);
     } catch (err: any) {
+      if (err?.message === authExpiredMarker) {
+        redirectToLogin();
+        return;
+      }
       setFeedbackError(err.message || '提交失败');
     } finally {
       setFeedbackLoading(false);
