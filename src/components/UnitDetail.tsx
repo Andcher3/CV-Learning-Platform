@@ -1004,7 +1004,20 @@ export default function UnitDetail() {
                       setPlanActionError('');
                     }
 
-                    setFiles(accepted);
+                    setFiles((prev) => {
+                      const existingKeys = new Set(prev.map((file) => `${file.name}__${file.size}__${file.lastModified}`));
+                      const merged = [...prev];
+                      for (const file of accepted) {
+                        const key = `${file.name}__${file.size}__${file.lastModified}`;
+                        if (existingKeys.has(key)) continue;
+                        existingKeys.add(key);
+                        merged.push(file);
+                      }
+                      return merged;
+                    });
+
+                    // Allow selecting the same file again in a future pick action.
+                    e.currentTarget.value = '';
                   }}
                 />
                 <label
