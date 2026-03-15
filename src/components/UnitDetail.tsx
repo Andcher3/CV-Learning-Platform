@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, CheckCircle, Clock, BookOpen, MessageSquare, Send, Paperclip, Link as LinkIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import SidebarAI from './SidebarAI';
@@ -187,6 +187,16 @@ export default function UnitDetail() {
   const [pageError, setPageError] = useState('');
   const [planHistory, setPlanHistory] = useState<any[]>([]);
   const [planViewIndex, setPlanViewIndex] = useState(0);
+  const [mainContentWidth, setMainContentWidth] = useState(() => {
+    try {
+      const raw = Number(localStorage.getItem('unit_detail_main_width') || 1024);
+      if (Number.isFinite(raw) && raw >= 900 && raw <= 1800) return raw;
+    } catch (err) {}
+    return 1024;
+  });
+  const [resizingMain, setResizingMain] = useState(false);
+  const resizeMainStartXRef = useRef(0);
+  const resizeMainStartWidthRef = useRef(1024);
   const planVersions = useMemo(() => {
     const versions: any[] = [];
     if (plan?.plan_content) {
@@ -251,6 +261,71 @@ export default function UnitDetail() {
       return Math.min(prev, planVersions.length - 1);
     });
   }, [planVersions.length]);
+
+  const getMainWidthBounds = () => {
+    if (typeof window === 'undefined') {
+      return { min: 900, max: 1600 };
+    }
+    const sidebarOpen = localStorage.getItem('sidebar_ai_open') !== '0';
+    const storedSidebarWidth = Number(localStorage.getItem('sidebar_ai_width') || 360);
+    const resolvedSidebarWidth = sidebarOpen
+      ? (Number.isFinite(storedSidebarWidth) ? Math.min(Math.max(storedSidebarWidth, 280), 760) : 360)
+      : 48;
+    const horizontalGutter = 80;
+    const max = Math.max(900, window.innerWidth - resolvedSidebarWidth - horizontalGutter);
+    return { min: 900, max: Math.min(1800, max) };
+  };
+
+  const clampMainWidth = (value: number) => {
+    const bounds = getMainWidthBounds();
+    return Math.min(bounds.max, Math.max(bounds.min, value));
+  };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('unit_detail_main_width', String(clampMainWidth(mainContentWidth)));
+    } catch (err) {}
+  }, [mainContentWidth]);
+
+  useEffect(() => {
+    if (!resizingMain) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const deltaX = event.clientX - resizeMainStartXRef.current;
+      const nextWidth = clampMainWidth(resizeMainStartWidthRef.current + deltaX);
+      setMainContentWidth(nextWidth);
+    };
+
+    const handleMouseUp = () => {
+      setResizingMain(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [resizingMain]);
+
+  useEffect(() => {
+    const syncWithinBounds = () => setMainContentWidth((prev) => clampMainWidth(prev));
+    window.addEventListener('resize', syncWithinBounds);
+    return () => window.removeEventListener('resize', syncWithinBounds);
+  }, []);
+
+  const handleMainResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
+    resizeMainStartXRef.current = event.clientX;
+    resizeMainStartWidthRef.current = mainContentWidth;
+    setResizingMain(true);
+  };
 
   const consumeEventStream = async (
     res: Response,
@@ -756,7 +831,25 @@ export default function UnitDetail() {
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* Main Content */}
-      <div className="flex-1 max-w-[120rem] mx-auto p-6 lg:p-8 pr-6 lg:pr-[22rem] 2xl:pr-[24rem] transition-all duration-300">
+      <div
+        className="relative flex-1 w-full mx-auto p-6 lg:p-8 pr-6 lg:pr-[22rem] 2xl:pr-[24rem] transition-all duration-300"
+        style={{ maxWidth: `${clampMainWidth(mainContentWidth)}px` }}
+      >
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整主内容宽度"
+          onMouseDown={handleMainResizeStart}
+          className="hidden lg:block absolute top-0 right-[21.5rem] h-full w-2 -translate-x-1 cursor-col-resize"
+        />
+        <div className="hidden lg:flex items-center justify-end mb-3">
+          <button
+            onClick={() => setMainContentWidth(1024)}
+            className="text-xs text-slate-500 hover:text-indigo-600 transition"
+          >
+            恢复默认宽度
+          </button>
+        </div>
         <button
           onClick={() => navigate('/dashboard')}
           className="flex items-center text-slate-500 hover:text-indigo-600 mb-6 transition"
@@ -848,7 +941,7 @@ export default function UnitDetail() {
                 [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:overflow-x-auto [&_pre]:my-4
                 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
                 [&_.plan-table-scroll]:max-w-full [&_.plan-table-scroll]:overflow-x-auto [&_.plan-table-scroll]:pb-1 [&_.plan-table-scroll]:my-4
-                [&_.plan-table-scroll_table]:table-fixed [&_.plan-table-scroll_table]:w-full [&_.plan-table-scroll_table]:min-w-[780px] [&_.plan-table-scroll_table]:max-w-[1600px] [&_.plan-table-scroll_table]:border-collapse [&_.plan-table-scroll_table]:my-0
+                [&_.plan-table-scroll_table]:table-fixed [&_.plan-table-scroll_table]:w-[clamp(920px,92vw,1400px)] [&_.plan-table-scroll_table]:border-collapse [&_.plan-table-scroll_table]:my-0
                 [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:whitespace-nowrap
                 [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:whitespace-normal [&_td]:break-words"
                 dangerouslySetInnerHTML={{ __html: renderedPlan as any }}
@@ -971,9 +1064,6 @@ export default function UnitDetail() {
             <label className="block text-sm font-medium text-slate-700 mb-2">提交新笔记 (提交后AI将动态调整计划)</label>
             <div className="text-sm text-slate-500 mb-2">
               今日计划自动调整次数：{adjustCount}/{maxAdjustCount}（今日剩余 {remainingAdjustCount} 次）
-            </div>
-            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-              提示：若附件包含较长代码段，建议同时提交 .md/.ipynb/.py 等文本代码文件（可与 Word 一起上传），可显著降低代码识别缺失风险。
             </div>
             {submittingNote && noteStreamStatus && <div className="text-sm text-indigo-600 mb-2">{noteStreamStatus}</div>}
             <textarea
