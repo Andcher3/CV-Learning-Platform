@@ -327,6 +327,10 @@ export default function UnitDetail() {
     setResizingMain(true);
   };
 
+  const removeSelectedFile = (targetIndex: number) => {
+    setFiles((prev) => prev.filter((_, index) => index !== targetIndex));
+  };
+
   const consumeEventStream = async (
     res: Response,
     handlers: {
@@ -840,7 +844,7 @@ export default function UnitDetail() {
           aria-orientation="vertical"
           aria-label="调整主内容宽度"
           onMouseDown={handleMainResizeStart}
-          className="hidden lg:block absolute top-0 right-[21.5rem] h-full w-2 -translate-x-1 cursor-col-resize"
+          className="hidden lg:block absolute top-0 right-[23.5rem] h-full w-2 -translate-x-1 cursor-col-resize"
         />
         <div className="hidden lg:flex items-center justify-end mb-3">
           <button
@@ -1129,12 +1133,6 @@ export default function UnitDetail() {
                   </button>
                 )}
               </div>
-
-              {files.length > 0 && (
-                <div className="text-xs text-slate-500 mr-3 max-w-[28rem] truncate">
-                  {files.map((item) => item.name).join('，')}
-                </div>
-              )}
               
               <button
                 onClick={submitNote}
@@ -1144,6 +1142,28 @@ export default function UnitDetail() {
                 <Send className="w-4 h-4 mr-2" /> {submittingNote ? '提交中...' : '提交笔记'}
               </button>
             </div>
+
+            {files.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {files.map((item, index) => (
+                  <span
+                    key={`${item.name}-${item.size}-${item.lastModified}-${index}`}
+                    className="inline-flex items-center gap-2 text-xs text-slate-700 bg-slate-100 border border-slate-200 rounded-full pl-3 pr-2 py-1"
+                    title={item.name}
+                  >
+                    <span className="max-w-[16rem] truncate">{item.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeSelectedFile(index)}
+                      className="text-rose-600 hover:text-rose-700"
+                      aria-label={`删除附件 ${item.name}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="space-y-6">
