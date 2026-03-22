@@ -1621,6 +1621,8 @@ function AISettings() {
   const [testing, setTesting] = useState(false);
   const [testMessage, setTestMessage] = useState('你好，这是测试消息');
   const [testResult, setTestResult] = useState('');
+  const [clearingFiles, setClearingFiles] = useState(false);
+  const [clearResult, setClearResult] = useState('');
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/admin/settings`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
@@ -1673,6 +1675,33 @@ function AISettings() {
       setTestResult(`错误: ${err.message}`);
     } finally {
       setTesting(false);
+    }
+  };
+
+  const handleClearCloudFiles = async () => {
+    const confirmed = window.confirm('确定清空当前 AI 服务商（如 KIMI）中的所有已上传文件吗？该操作不可撤销。');
+    if (!confirmed) return;
+
+    setClearingFiles(true);
+    setClearResult('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/ai/files/clear`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '清空失败');
+      }
+
+      const failedPreview = Array.isArray(data?.failed) && data.failed.length > 0
+        ? `\n失败样例：${data.failed.slice(0, 5).map((item: any) => `${item.id}(${item.status})`).join('，')}`
+        : '';
+      setClearResult(`已处理完成：扫描 ${data?.listed_count ?? 0} 份，删除成功 ${data?.deleted_count ?? 0} 份，失败 ${data?.failed_count ?? 0} 份。${failedPreview}`);
+    } catch (err: any) {
+      setClearResult(`错误: ${err?.message || '清空失败'}`);
+    } finally {
+      setClearingFiles(false);
     }
   };
 
@@ -1749,6 +1778,25 @@ function AISettings() {
               {testResult}
             </div>
           )}
+
+          <div className="mt-2 pt-4 border-t border-slate-200">
+            <div className="text-sm font-medium text-slate-900 mb-2">KIMI 云端文件维护</div>
+            <p className="text-xs text-slate-500 mb-3">
+              清空 AI 平台云端文件池（不影响服务器本地保存的学生附件）。适用于处理 KIMI 文件数上限问题。
+            </p>
+            <button
+              onClick={handleClearCloudFiles}
+              disabled={clearingFiles}
+              className="bg-rose-600 text-white px-4 py-2 rounded-lg hover:bg-rose-700 transition disabled:opacity-50"
+            >
+              {clearingFiles ? '清空中...' : '清空 KIMI 云端文件'}
+            </button>
+            {clearResult && (
+              <div className="mt-3 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3 whitespace-pre-wrap">
+                {clearResult}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

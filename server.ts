@@ -119,7 +119,7 @@ async function startServer() {
   }
 
   // AI Setup
-  const getAiClient = () => {
+  const getAiRuntimeConfig = () => {
     const settings = db.prepare('SELECT * FROM settings').all() as any[];
     const config: Record<string, string> = {};
     settings.forEach(s => config[s.key] = typeof s.value === 'string' ? s.value.trim() : s.value);
@@ -136,9 +136,15 @@ async function startServer() {
     }
 
     const baseURL = useCustomConfig ? (config.ai_base_url || defaultBaseURL) : defaultBaseURL;
+    const model = useCustomConfig ? (config.ai_model || defaultModel) : defaultModel;
+
+    return { apiKey, baseURL, model };
+  };
+
+  const getAiClient = () => {
+    const { apiKey, baseURL, model } = getAiRuntimeConfig();
     const timeoutMs = Number(process.env.AI_TIMEOUT_MS || 60000);
     const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 2 });
-    const model = useCustomConfig ? (config.ai_model || defaultModel) : defaultModel;
 
     return { client, model };
   };
@@ -736,6 +742,90 @@ async function startServer() {
       res.json({ ok: true, reply });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message || 'AI test failed' });
+    }
+  });
+
+  app.post('/api/admin/ai/files/clear', authenticate, requireAdmin, async (req: any, res: any) => {
+    try {
+      const { apiKey, baseURL } = getAiRuntimeConfig();
+      const normalizedBase = String(baseURL || '').replace(/\/+$/, '');
+      const listEndpoint = `${normalizedBase}/files`;
+
+      const requestHeaders = {
+        Authorization: `Bearer ${apiKey}`
+      };
+
+      const failed: Array<{ id: string; status: number; error: string }> = [];
+      const seenIds = new Set<string>();
+      let listedCount = 0;
+      let deletedCount = 0;
+      let pageCount = 0;
+      let after = '';
+
+      while (pageCount < 50) {
+        pageCount += 1;
+        const listUrl = new URL(listEndpoint);
+        listUrl.searchParams.set('limit', '100');
+        if (after) {
+          listUrl.searchParams.set('after', after);
+        }
+
+        const listResp = await fetch(listUrl.toString(), {
+          method: 'GET',
+          headers: requestHeaders
+        });
+        const listData: any = await listResp.json().catch(() => ({}));
+
+        if (!listResp.ok) {
+          const message = String(listData?.error?.message || listData?.error || '文件列表获取失败');
+          return res.status(502).json({ error: `获取云端文件列表失败: ${message}` });
+        }
+
+        const files = Array.isArray(listData?.data) ? listData.data : [];
+        if (files.length === 0) {
+          break;
+        }
+
+        for (const item of files) {
+          const fileId = String(item?.id || '').trim();
+          if (!fileId || seenIds.has(fileId)) continue;
+          seenIds.add(fileId);
+          listedCount += 1;
+
+          const delResp = await fetch(`${listEndpoint}/${encodeURIComponent(fileId)}`, {
+            method: 'DELETE',
+            headers: requestHeaders
+          });
+
+          if (delResp.ok) {
+            deletedCount += 1;
+            continue;
+          }
+
+          const delData: any = await delResp.json().catch(() => ({}));
+          failed.push({
+            id: fileId,
+            status: delResp.status,
+            error: String(delData?.error?.message || delData?.error || delResp.statusText || '删除失败')
+          });
+        }
+
+        const hasMore = Boolean(listData?.has_more);
+        const lastId = String(listData?.last_id || files[files.length - 1]?.id || '').trim();
+        if (!hasMore || !lastId) {
+          break;
+        }
+        after = lastId;
+      }
+
+      return res.json({
+        listed_count: listedCount,
+        deleted_count: deletedCount,
+        failed_count: failed.length,
+        failed
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || '清空云端文件失败' });
     }
   });
 
