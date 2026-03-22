@@ -563,7 +563,7 @@ async function startServer() {
 
   // Admin Users API
   app.get('/api/admin/users', authenticate, requireAdmin, (req: any, res: any) => {
-    const users = db.prepare('SELECT id, username, role, password FROM users').all();
+    const users = db.prepare('SELECT id, username, role FROM users').all();
     res.json(users);
   });
 
@@ -846,7 +846,7 @@ async function startServer() {
           WHERE n.student_id = u.id AND n.unit_id = ?
           ORDER BY n.created_at DESC, n.id DESC
           LIMIT 1
-        ) AS latest_feedback,
+        ) AS final_feedback,
         CASE WHEN EXISTS (
           SELECT 1 FROM study_plans p WHERE p.student_id = u.id AND p.unit_id = ?
         ) THEN 1 ELSE 0 END AS has_plan
@@ -858,7 +858,8 @@ async function startServer() {
     const data = rows.map((row) => ({
       ...row,
       has_plan: Number(row.has_plan || 0) === 1,
-      final_grade: row.final_grade == null || String(row.final_grade).trim() === '' ? null : Number(row.final_grade)
+      final_grade: row.final_grade == null || String(row.final_grade).trim() === '' ? null : Number(row.final_grade),
+      final_feedback: String(row.final_feedback || '').trim()
     }));
 
     res.json({

@@ -290,7 +290,7 @@ function AdminAnnouncements() {
 function UsersManagement() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [users, setUsers] = useState<any[]>([]);
-  const [userSortKey, setUserSortKey] = useState<'id' | 'username' | 'role' | 'password'>('id');
+  const [userSortKey, setUserSortKey] = useState<'id' | 'username' | 'role'>('id');
   const [userSortDirection, setUserSortDirection] = useState<SortDirection>('asc');
   const [editingUser, setEditingUser] = useState<any>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -391,7 +391,6 @@ function UsersManagement() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-2">批量注册学生账号</h3>
         <p className="text-sm text-slate-500 mb-3">每行格式：学号 姓名。姓名中的 * 会自动去掉；创建后账号=姓名，密码=学号。</p>
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">说明：系统仅保存密码哈希（加密后字符串），无法反查明文密码。若学生忘记密码，请在“编辑账户”中直接重置新密码。</p>
         <textarea
           value={batchText}
           onChange={(e) => setBatchText(e.target.value)}
@@ -441,13 +440,12 @@ function UsersManagement() {
           <span className="text-xs text-slate-500">排序</span>
           <select
             value={userSortKey}
-            onChange={(e) => setUserSortKey(e.target.value as 'id' | 'username' | 'role' | 'password')}
+            onChange={(e) => setUserSortKey(e.target.value as 'id' | 'username' | 'role')}
             className="border border-slate-300 rounded px-2 py-1 text-sm"
           >
             <option value="id">ID</option>
             <option value="username">账号</option>
             <option value="role">角色</option>
-            <option value="password">密码哈希</option>
           </select>
           <select
             value={userSortDirection}
@@ -464,7 +462,6 @@ function UsersManagement() {
               <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">ID</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">用户名</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">角色</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">密码（哈希）</th>
               <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">操作</th>
             </tr>
           </thead>
@@ -477,9 +474,6 @@ function UsersManagement() {
                   <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
                     {user.role === 'admin' ? '管理员' : '学生'}
                   </span>
-                </td>
-                <td className="px-6 py-4 text-xs text-slate-500 max-w-xs">
-                  <div className="truncate" title={String(user.password || '')}>{user.password || '-'}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <button onClick={() => openEdit(user)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit className="w-4 h-4" /></button>
@@ -544,7 +538,17 @@ function AdminRecords() {
   const [planSortDirection, setPlanSortDirection] = useState<SortDirection>('desc');
   const [scoreSortKey, setScoreSortKey] = useState<'student_id' | 'student_username' | 'final_grade' | 'latest_note_created_at' | 'has_plan'>('student_id');
   const [scoreSortDirection, setScoreSortDirection] = useState<SortDirection>('asc');
-  const [detailModal, setDetailModal] = useState<{ title: string; content: string; markdown?: boolean } | null>(null);
+  const [recordViewer, setRecordViewer] = useState<{
+    open: boolean;
+    title: string;
+    content: string;
+    mode: 'text' | 'markdown';
+  }>({
+    open: false,
+    title: '',
+    content: '',
+    mode: 'text'
+  });
 
   const resolveFileUrl = (fileUrl: string | null) => {
     if (!fileUrl) return '';
@@ -766,6 +770,15 @@ function AdminRecords() {
     return formatDateTimeCn(value);
   };
 
+  const openRecordViewer = (title: string, content: string, mode: 'text' | 'markdown' = 'text') => {
+    setRecordViewer({
+      open: true,
+      title,
+      content: String(content || '').trim(),
+      mode
+    });
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -838,8 +851,8 @@ function AdminRecords() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">账号</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">最终分数</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">最近提交时间</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学习计划</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">AI评价</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">学习计划</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-200">
@@ -855,26 +868,26 @@ function AdminRecords() {
                         <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{row.final_grade ?? '-'}</td>
                         <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(row.latest_note_created_at)}</td>
                         <td className="px-4 py-3 text-sm whitespace-nowrap">
-                          {row.has_plan ? (
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">有</span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">无</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm whitespace-nowrap">
-                          {String(row.latest_feedback || '').trim() ? (
+                          {row.final_feedback ? (
                             <button
-                              onClick={() => setDetailModal({
-                                title: `${row.student_username} - ${selectedUnitId ? `单元${selectedUnitId}` : '单元'} AI评价`,
-                                content: String(row.latest_feedback || ''),
-                                markdown: true,
-                              })}
-                              className="px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition"
+                              onClick={() => openRecordViewer(
+                                `${row.student_username} · ${units.find((item: any) => String(item.id) === String(selectedUnitId))?.title || '当前单元'} · AI评分评价`,
+                                String(row.final_feedback || ''),
+                                'markdown'
+                              )}
+                              className="text-indigo-600 hover:text-indigo-800 hover:underline"
                             >
                               查看评价
                             </button>
                           ) : (
                             <span className="text-slate-400">无</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm whitespace-nowrap">
+                          {row.has_plan ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">有</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">无</span>
                           )}
                         </td>
                       </tr>
@@ -1010,7 +1023,7 @@ function AdminRecords() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">提交时间</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">评分</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">附件</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">笔记全文</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">内容摘要</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-200">
@@ -1035,20 +1048,23 @@ function AdminRecords() {
                           <span className="text-slate-400">无</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-sm whitespace-nowrap">
-                        {String(note.content || '').trim() ? (
-                          <button
-                            onClick={() => setDetailModal({
-                              title: `${note.student_username} - ${note.unit_title} 笔记全文`,
-                              content: String(note.content || ''),
-                              markdown: false,
-                            })}
-                            className="px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition"
-                          >
-                            查看全文
-                          </button>
+                      <td className="px-4 py-3 text-sm text-slate-700 max-w-xs">
+                        {note.content ? (
+                          <div className="space-y-1">
+                            <div className="whitespace-pre-wrap">{`${note.content.slice(0, 100)}${note.content.length > 100 ? '...' : ''}`}</div>
+                            <button
+                              onClick={() => openRecordViewer(
+                                `${note.student_username} · ${note.unit_title} · 学习笔记`,
+                                String(note.content || ''),
+                                'text'
+                              )}
+                              className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                            >
+                              查看全文
+                            </button>
+                          </div>
                         ) : (
-                          <span className="text-slate-400">无</span>
+                          '无'
                         )}
                       </td>
                     </tr>
@@ -1139,22 +1155,26 @@ function AdminRecords() {
               </table>
             </div>
           </div>
+        </>
+      )}
 
-          {detailModal && (
-            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-              <div className="bg-white w-full max-w-4xl rounded-2xl border border-slate-200 shadow-xl p-6">
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <h4 className="text-lg font-semibold text-slate-900">{detailModal.title}</h4>
-                  <button
-                    onClick={() => setDetailModal(null)}
-                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
-                  >
-                    关闭
-                  </button>
-                </div>
-                {detailModal.markdown ? (
+      {recordViewer.open && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-4xl max-h-[85vh] rounded-2xl border border-slate-200 shadow-xl overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h4 className="text-base font-semibold text-slate-900">{recordViewer.title}</h4>
+              <button
+                onClick={() => setRecordViewer({ open: false, title: '', content: '', mode: 'text' })}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                关闭
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto text-sm text-slate-700">
+              {recordViewer.content ? (
+                recordViewer.mode === 'markdown' ? (
                   <div
-                    className="max-h-[70vh] overflow-y-auto text-sm text-slate-700 leading-7
+                    className="leading-7
                     [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2
                     [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-2
                     [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1
@@ -1162,16 +1182,21 @@ function AdminRecords() {
                     [&_li]:my-1 [&_a]:text-indigo-600 [&_a]:underline
                     [&_code]:bg-slate-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.92em]
                     [&_pre]:bg-slate-900 [&_pre]:text-slate-100 [&_pre]:rounded-xl [&_pre]:p-3 [&_pre]:overflow-x-auto [&_pre]:my-3
-                    [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(detailModal.content) as any }}
+                    [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
+                    [&_table]:w-full [&_table]:min-w-max [&_table]:border-collapse [&_table]:my-3
+                    [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left
+                    [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdownHtml(recordViewer.content) as any }}
                   />
                 ) : (
-                  <pre className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap text-sm text-slate-700 leading-6 bg-slate-50 border border-slate-200 rounded-xl p-4">{detailModal.content}</pre>
-                )}
-              </div>
+                  <div className="whitespace-pre-wrap leading-7">{recordViewer.content}</div>
+                )
+              ) : (
+                <div className="text-slate-500">暂无内容</div>
+              )}
             </div>
-          )}
-        </>
+          </div>
+        </div>
       )}
     </div>
   );
