@@ -844,7 +844,7 @@ export default function UnitDetail() {
           aria-orientation="vertical"
           aria-label="调整主内容宽度"
           onMouseDown={handleMainResizeStart}
-          className="hidden lg:block absolute top-0 right-[23.5rem] h-full w-2 -translate-x-1 cursor-col-resize"
+          className="hidden lg:block absolute top-0 right-[22rem] h-full w-2 -translate-x-1 cursor-col-resize"
         />
         <div className="hidden lg:flex items-center justify-end mb-3">
           <button
