@@ -302,7 +302,10 @@ async function startServer() {
     const dataRoot = path.resolve(DATA_DIR);
     const uploadsRoot = path.resolve(uploadsDir);
     const notesRoot = path.resolve(NOTES_DIR);
-    const allowedTextExt = new Set(['.md', '.txt', '.json', '.csv', '.yaml', '.yml', '.ipynb']);
+    const allowedTextExt = new Set([
+      '.md', '.txt', '.json', '.csv', '.yaml', '.yml', '.ipynb',
+      '.py', '.js', '.ts', '.tsx', '.java', '.cpp', '.c', '.go', '.sh', '.html', '.css'
+    ]);
 
     for (const filePath of uniqueFiles) {
       const resolved = resolveFilePathFromToken(filePath);
@@ -311,22 +314,36 @@ async function startServer() {
       if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) continue;
 
       const ext = path.extname(resolved).toLowerCase();
-      const stat = fs.statSync(resolved);
+      let extractedByCloud = false;
 
+      // Cloud extraction first for all file types to maximize full-fidelity parsing.
+      if (client) {
+        const extractedText = await extractBinaryFileText(client, resolved);
+        if (extractedText) {
+          fileBlocks.push(`[文件: ${resolved}][云端提取]\n${extractedText}`);
+          usedFiles.push(resolved);
+          extractedByCloud = true;
+        }
+      }
+      if (extractedByCloud) continue;
+
+      // Local fallbacks when cloud extraction fails.
       if (ext === '.ipynb') {
         const notebookText = extractIpynbText(resolved);
         if (notebookText) {
-          fileBlocks.push(`[文件: ${resolved}][Jupyter Notebook 提取]\n${notebookText}`);
+          fileBlocks.push(`[文件: ${resolved}][Jupyter Notebook 本地提取]\n${notebookText}`);
           usedFiles.push(resolved);
           continue;
         }
       }
 
       if (allowedTextExt.has(ext)) {
-        const content = fs.readFileSync(resolved, 'utf-8');
-        fileBlocks.push(`[文件: ${resolved}]\n${content}`);
-        usedFiles.push(resolved);
-        continue;
+        try {
+          const content = fs.readFileSync(resolved, 'utf-8');
+          fileBlocks.push(`[文件: ${resolved}][本地文本读取]\n${content}`);
+          usedFiles.push(resolved);
+          continue;
+        } catch (err) {}
       }
 
       if (ext === '.pdf') {
@@ -338,26 +355,7 @@ async function startServer() {
         }
       }
 
-      if (client) {
-        const extractedText = await extractBinaryFileText(client, resolved);
-        if (extractedText) {
-          fileBlocks.push(`[文件: ${resolved}][提取文本]\n${extractedText}`);
-          usedFiles.push(resolved);
-          continue;
-        }
-      }
-
-      if (path.extname(resolved).toLowerCase() === '.pdf') {
-        const fallbackPdfText = await tryExtractPdfLocally(resolved);
-        if (fallbackPdfText) {
-          fileBlocks.push(`[文件: ${resolved}][本地PDF提取]\n${fallbackPdfText}`);
-          usedFiles.push(resolved);
-        } else {
-          fileBlocks.push(`[文件: ${resolved}] (尝试提取失败，可能是格式不支持或OCR失败)`);
-        }
-      } else {
-        fileBlocks.push(`[文件: ${resolved}] (跳过附件，原因: 非文本且超过限制或未提供AI文件提取能力)`);
-      }
+      fileBlocks.push(`[文件: ${resolved}] (提取失败：云端与本地兜底均未成功，可能为损坏文件或暂不支持的格式)`);
     }
 
     const appended = fileBlocks.length > 0 ? `\n\n[附加文件内容]\n${fileBlocks.join('\n\n')}` : '';
@@ -2348,7 +2346,9 @@ async function startServer() {
       promptBuildMs = Date.now() - promptBuildStartedAt;
       promptLength = prompt.length;
       filesCount = files.length;
-      sendSse('stage', { message: '评分提示词已构建，AI开始评分...' });
+      sendSse('stage', {
+        message: `评分提示词已构建：附件 ${noteAttachmentPaths.length} 份，成功提取 ${files.length} 份。AI 开始评分...`
+      });
 
       const gradePrompt = prompt;
       const gradeMaxTokens = Number(process.env.AI_GRADE_MAX_TOKENS || 1800);
@@ -2476,7 +2476,15 @@ async function startServer() {
       db.prepare('UPDATE notes SET grade = ?, feedback = ? WHERE id = ?').run(gradeText, feedbackValue, latestNote.id);
       const elapsedMs = Date.now() - startedAt;
       console.log('[grade] success total_ms=%d prompt_build_ms=%d ai_elapsed_ms=%d prompt_length=%d files=%d unitId=%s user=%s', elapsedMs, promptBuildMs, aiElapsedMs, promptLength, filesCount, unitId, req.user?.id);
-      const payload = { grade: gradeText, feedback: feedbackValue, prompt_preview: prompt, files_used: files, ai_raw: raw };
+      const payload = {
+        grade: gradeText,
+        feedback: feedbackValue,
+        prompt_preview: prompt,
+        files_used: files,
+        attachments_total: noteAttachmentPaths.length,
+        attachments_extracted: files.length,
+        ai_raw: raw
+      };
       if (wantsStream) {
         sendSse('final', payload);
         sendSse('done', { ok: true });
