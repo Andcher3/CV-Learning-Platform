@@ -61,6 +61,7 @@ db.exec(`
     content TEXT NOT NULL,
     file_url TEXT,
     file_urls TEXT,
+    file_names TEXT,
     grade TEXT,
     feedback TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -159,6 +160,11 @@ try {
 }
 try {
   db.exec("ALTER TABLE notes ADD COLUMN file_urls TEXT");
+} catch (e) {
+  // Column might already exist
+}
+try {
+  db.exec("ALTER TABLE notes ADD COLUMN file_names TEXT");
 } catch (e) {
   // Column might already exist
 }

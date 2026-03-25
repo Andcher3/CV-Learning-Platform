@@ -564,6 +564,43 @@ function AdminRecords() {
     return single ? [single] : [];
   };
 
+  const getNoteAttachmentNameMap = (note: any): Record<string, string> => {
+    if (note?.file_names && typeof note.file_names === 'object' && !Array.isArray(note.file_names)) {
+      const normalized: Record<string, string> = {};
+      for (const [key, value] of Object.entries(note.file_names as Record<string, any>)) {
+        const fileUrl = String(key || '').trim();
+        const originalName = String(value || '').trim();
+        if (!fileUrl || !originalName) continue;
+        normalized[fileUrl] = originalName;
+      }
+      return normalized;
+    }
+
+    try {
+      const parsed = JSON.parse(String(note?.file_names || '{}'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const normalized: Record<string, string> = {};
+        for (const [key, value] of Object.entries(parsed as Record<string, any>)) {
+          const fileUrl = String(key || '').trim();
+          const originalName = String(value || '').trim();
+          if (!fileUrl || !originalName) continue;
+          normalized[fileUrl] = originalName;
+        }
+        return normalized;
+      }
+    } catch (err) {}
+
+    return {};
+  };
+
+  const getFallbackAttachmentName = (url: string) => {
+    const normalized = String(url || '').trim();
+    if (!normalized) return '附件';
+    const clean = normalized.split('?')[0].split('#')[0];
+    const parts = clean.split('/').filter(Boolean);
+    return decodeURIComponent(parts[parts.length - 1] || '附件');
+  };
+
   const loadUnitScores = async (unitId: string) => {
     if (!unitId) {
       setUnitScores([]);
@@ -1038,11 +1075,22 @@ function AdminRecords() {
                       <td className="px-4 py-3 text-sm text-indigo-600">
                         {getNoteAttachmentUrls(note).length > 0 ? (
                           <div className="flex flex-wrap gap-2">
-                            {getNoteAttachmentUrls(note).map((attachmentUrl, index) => (
-                              <a key={`${note.id}-file-${index}`} className="hover:underline" href={resolveFileUrl(attachmentUrl)} target="_blank" rel="noreferrer">
-                                下载{getNoteAttachmentUrls(note).length > 1 ? index + 1 : ''}
-                              </a>
-                            ))}
+                            {getNoteAttachmentUrls(note).map((attachmentUrl, index) => {
+                              const nameMap = getNoteAttachmentNameMap(note);
+                              const originalName = String(nameMap[attachmentUrl] || '').trim() || getFallbackAttachmentName(attachmentUrl);
+                              return (
+                                <a
+                                  key={`${note.id}-file-${index}`}
+                                  className="hover:underline"
+                                  href={resolveFileUrl(attachmentUrl)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title={originalName}
+                                >
+                                  {originalName}
+                                </a>
+                              );
+                            })}
                           </div>
                         ) : (
                           <span className="text-slate-400">无</span>

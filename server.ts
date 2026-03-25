@@ -5,6 +5,7 @@ import db from './server/db';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import OpenAI from 'openai';
+import { toFile } from 'openai/uploads';
 import path from 'path';
 import multer from 'multer';
 import fs from 'fs';
@@ -197,10 +198,12 @@ async function startServer() {
     }
   };
 
-  const extractBinaryFileText = async (client: any, resolvedPath: string) => {
+  const extractBinaryFileText = async (client: any, resolvedPath: string, uploadFilename?: string) => {
     try {
+      const preferredName = String(uploadFilename || path.basename(resolvedPath) || 'attachment.bin');
+      const fileForUpload = await toFile(fs.createReadStream(resolvedPath) as any, preferredName);
       const uploaded: any = await client.files.create({
-        file: fs.createReadStream(resolvedPath),
+        file: fileForUpload,
         purpose: 'file-extract'
       });
       const contentResp: any = await client.files.content(uploaded.id);
@@ -243,21 +246,55 @@ async function startServer() {
     return single ? [single] : [];
   };
 
-  const withNoteFileUrls = (note: any) => {
-    if (!note || typeof note !== 'object') return note;
-    return { ...note, file_urls: parseNoteFileUrls(note) };
+  const parseNoteFileNameMap = (note: any): Record<string, string> => {
+    try {
+      const parsed = JSON.parse(String(note?.file_names || '{}'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const normalized: Record<string, string> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+          const fileUrl = String(key || '').trim();
+          const original = String(value || '').trim();
+          if (!fileUrl || !original) continue;
+          normalized[fileUrl] = original;
+        }
+        return normalized;
+      }
+    } catch (err) {}
+    return {};
   };
 
-  const resolveAttachmentPathsFromUrls = (fileUrls: string[]) => {
+  const withNoteFileUrls = (note: any) => {
+    if (!note || typeof note !== 'object') return note;
+    return {
+      ...note,
+      file_urls: parseNoteFileUrls(note),
+      file_names: parseNoteFileNameMap(note)
+    };
+  };
+
+  const resolveAttachmentEntriesFromUrls = (fileUrls: string[], fileNameMap?: Record<string, string>) => {
     return fileUrls
       .map((url) => {
         const normalized = String(url || '').trim();
         if (!normalized) return null;
-        if (normalized.startsWith('/notes/')) return path.join(NOTES_DIR, path.basename(normalized));
-        if (normalized.startsWith('/uploads/')) return path.join(uploadsDir, path.basename(normalized));
-        return null;
+        const resolvedPath = normalized.startsWith('/notes/')
+          ? path.join(NOTES_DIR, path.basename(normalized))
+          : normalized.startsWith('/uploads/')
+            ? path.join(uploadsDir, path.basename(normalized))
+            : null;
+        if (!resolvedPath) return null;
+        const preferredName = String(fileNameMap?.[normalized] || path.basename(normalized) || '').trim();
+        return {
+          url: normalized,
+          path: resolvedPath,
+          originalName: preferredName || path.basename(resolvedPath)
+        };
       })
-      .filter(Boolean) as string[];
+      .filter(Boolean) as Array<{ url: string; path: string; originalName: string }>;
+  };
+
+  const resolveAttachmentPathsFromUrls = (fileUrls: string[]) => {
+    return resolveAttachmentEntriesFromUrls(fileUrls).map((item) => item.path);
   };
 
   const extractIpynbText = (resolvedPath: string) => {
@@ -291,7 +328,7 @@ async function startServer() {
     }
   };
 
-  const buildPromptWithFiles = async (basePrompt: string, client?: any) => {
+  const buildPromptWithFiles = async (basePrompt: string, client?: any, fileNameHints?: Record<string, string>) => {
     const files = Array.from(basePrompt.matchAll(/FILES:\s*([^\n]+)/ig))
       .flatMap(match => match[1].split(',').map(f => f.trim()))
       .filter(Boolean);
@@ -314,13 +351,14 @@ async function startServer() {
       if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) continue;
 
       const ext = path.extname(resolved).toLowerCase();
+      const displayName = String(fileNameHints?.[resolved] || path.basename(resolved) || '未知文件');
       let extractedByCloud = false;
 
       // Cloud extraction first for all file types to maximize full-fidelity parsing.
       if (client) {
-        const extractedText = await extractBinaryFileText(client, resolved);
+        const extractedText = await extractBinaryFileText(client, resolved, displayName);
         if (extractedText) {
-          fileBlocks.push(`[文件: ${resolved}][云端提取]\n${extractedText}`);
+          fileBlocks.push(`[文件: ${displayName}][云端提取]\n${extractedText}`);
           usedFiles.push(resolved);
           extractedByCloud = true;
         }
@@ -331,7 +369,7 @@ async function startServer() {
       if (ext === '.ipynb') {
         const notebookText = extractIpynbText(resolved);
         if (notebookText) {
-          fileBlocks.push(`[文件: ${resolved}][Jupyter Notebook 本地提取]\n${notebookText}`);
+          fileBlocks.push(`[文件: ${displayName}][Jupyter Notebook 本地提取]\n${notebookText}`);
           usedFiles.push(resolved);
           continue;
         }
@@ -340,7 +378,7 @@ async function startServer() {
       if (allowedTextExt.has(ext)) {
         try {
           const content = fs.readFileSync(resolved, 'utf-8');
-          fileBlocks.push(`[文件: ${resolved}][本地文本读取]\n${content}`);
+          fileBlocks.push(`[文件: ${displayName}][本地文本读取]\n${content}`);
           usedFiles.push(resolved);
           continue;
         } catch (err) {}
@@ -349,13 +387,13 @@ async function startServer() {
       if (ext === '.pdf') {
         const fallbackPdfText = await tryExtractPdfLocally(resolved);
         if (fallbackPdfText) {
-          fileBlocks.push(`[文件: ${resolved}][本地PDF提取]\n${fallbackPdfText}`);
+          fileBlocks.push(`[文件: ${displayName}][本地PDF提取]\n${fallbackPdfText}`);
           usedFiles.push(resolved);
           continue;
         }
       }
 
-      fileBlocks.push(`[文件: ${resolved}] (提取失败：云端与本地兜底均未成功，可能为损坏文件或暂不支持的格式)`);
+      fileBlocks.push(`[文件: ${displayName}] (提取失败：云端与本地兜底均未成功，可能为损坏文件或暂不支持的格式)`);
     }
 
     const appended = fileBlocks.length > 0 ? `\n\n[附加文件内容]\n${fileBlocks.join('\n\n')}` : '';
@@ -2105,6 +2143,7 @@ async function startServer() {
     }
 
     const fileUrls: string[] = [];
+    const fileNameMapByUrl: Record<string, string> = {};
     for (let index = 0; index < uploadedFiles.length; index++) {
       const currentFile = uploadedFiles[index];
       const originalExt = path.extname(currentFile.originalname || '').toLowerCase();
@@ -2114,7 +2153,9 @@ async function startServer() {
       const fromPath = currentFile.path;
       const toPath = path.join(NOTES_DIR, filename);
       fs.renameSync(fromPath, toPath);
-      fileUrls.push(`/notes/${filename}`);
+      const fileUrlToken = `/notes/${filename}`;
+      fileUrls.push(fileUrlToken);
+      fileNameMapByUrl[fileUrlToken] = String(currentFile.originalname || filename).trim();
     }
     const fileUrl = fileUrls[0] || null;
 
@@ -2122,13 +2163,14 @@ async function startServer() {
     if (!unit) return respondError(404, 'Unit not found');
 
     // Save note
-    const result = db.prepare('INSERT INTO notes (student_id, unit_id, week, content, file_url, file_urls) VALUES (?, ?, ?, ?, ?, ?)').run(
+    const result = db.prepare('INSERT INTO notes (student_id, unit_id, week, content, file_url, file_urls, file_names) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
       req.user.id,
       unitId,
       week,
       content || '',
       fileUrl,
-      JSON.stringify(fileUrls)
+      JSON.stringify(fileUrls),
+      JSON.stringify(fileNameMapByUrl)
     );
     const noteId = result.lastInsertRowid;
 
@@ -2168,11 +2210,16 @@ async function startServer() {
           ].join('\n');
 
           const baseAdjustPrompt = prompts.adjustPlan(unit, plan, content, fileUrls, progressContext);
-          const noteAttachmentPaths = resolveAttachmentPathsFromUrls(fileUrls);
+          const noteAttachmentEntries = resolveAttachmentEntriesFromUrls(fileUrls, fileNameMapByUrl);
+          const noteAttachmentPaths = noteAttachmentEntries.map((item) => item.path);
+          const noteAttachmentNameHints = noteAttachmentEntries.reduce((acc, item) => {
+            acc[item.path] = item.originalName;
+            return acc;
+          }, {} as Record<string, string>);
           const adjustPromptWithFile = noteAttachmentPaths.length > 0
             ? `${baseAdjustPrompt}\nFILES: ${noteAttachmentPaths.join(', ')}`
             : baseAdjustPrompt;
-          const { prompt: adjustPrompt } = await buildPromptWithFiles(adjustPromptWithFile, client);
+          const { prompt: adjustPrompt } = await buildPromptWithFiles(adjustPromptWithFile, client, noteAttachmentNameHints);
 
           let newPlanContent = plan.plan_content;
           if (wantsStream) {
@@ -2336,13 +2383,19 @@ async function startServer() {
       const { client, model } = getAiClient();
       const normalizedLatestNote = withNoteFileUrls(latestNote);
       const noteFileUrls = parseNoteFileUrls(normalizedLatestNote);
+      const noteFileNameMap = parseNoteFileNameMap(normalizedLatestNote);
       const basePrompt = prompts.gradeUnit(unit, plan, normalizedLatestNote);
-      const noteAttachmentPaths = resolveAttachmentPathsFromUrls(noteFileUrls);
+      const noteAttachmentEntries = resolveAttachmentEntriesFromUrls(noteFileUrls, noteFileNameMap);
+      const noteAttachmentPaths = noteAttachmentEntries.map((item) => item.path);
+      const noteAttachmentNameHints = noteAttachmentEntries.reduce((acc, item) => {
+        acc[item.path] = item.originalName;
+        return acc;
+      }, {} as Record<string, string>);
       const promptWithNoteFile = noteAttachmentPaths.length > 0
         ? `${basePrompt}\nFILES: ${noteAttachmentPaths.join(', ')}`
         : basePrompt;
       const promptBuildStartedAt = Date.now();
-      const { prompt, files } = await buildPromptWithFiles(promptWithNoteFile, client);
+      const { prompt, files } = await buildPromptWithFiles(promptWithNoteFile, client, noteAttachmentNameHints);
       promptBuildMs = Date.now() - promptBuildStartedAt;
       promptLength = prompt.length;
       filesCount = files.length;
@@ -2584,7 +2637,7 @@ async function startServer() {
       let latestPlanContext = '';
       let currentUnitContext = '';
       if (unitId) {
-        const latestNote = db.prepare('SELECT content, file_url, file_urls, created_at FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any;
+        const latestNote = db.prepare('SELECT content, file_url, file_urls, file_names, created_at FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any;
         if (latestNote) {
           const noteFileUrls = parseNoteFileUrls(latestNote);
           latestNoteContext = `\n【该学生在本单元最新一次笔记（后端实时读取）】\n提交时间：${latestNote.created_at || '未知'}\n笔记内容：${latestNote.content || '无'}\n是否有附件：${noteFileUrls.length > 0 ? `是（共${noteFileUrls.length}份：${noteFileUrls.join('、')}）` : '否'}\n`;
@@ -2609,11 +2662,16 @@ async function startServer() {
 
       const mergedContext = `${context || ''}${currentUnitContext}${latestPlanContext}${latestNoteContext}`;
       const latestAttachmentNote = unitId
-        ? db.prepare('SELECT file_url, file_urls FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any
+        ? db.prepare('SELECT file_url, file_urls, file_names FROM notes WHERE student_id = ? AND unit_id = ? ORDER BY created_at DESC LIMIT 1').get(req.user.id, unitId) as any
         : null;
-      const latestAttachmentFiles = latestAttachmentNote
-        ? resolveAttachmentPathsFromUrls(parseNoteFileUrls(latestAttachmentNote))
+      const latestAttachmentEntries = latestAttachmentNote
+        ? resolveAttachmentEntriesFromUrls(parseNoteFileUrls(latestAttachmentNote), parseNoteFileNameMap(latestAttachmentNote))
         : [];
+      const latestAttachmentFiles = latestAttachmentEntries.map((item) => item.path);
+      const latestAttachmentNameHints = latestAttachmentEntries.reduce((acc, item) => {
+        acc[item.path] = item.originalName;
+        return acc;
+      }, {} as Record<string, string>);
       const outlinePathCandidates = unitId
         ? [
             path.join(DATA_DIR, `admin/plan_unit/unit${unitId}/计算机视觉大纲_${unitId}.md`),
@@ -2627,7 +2685,7 @@ async function startServer() {
       const filesForPrompt = [...latestAttachmentFiles, outlinePath].filter(Boolean) as string[];
       const promptWithAttachment = filesForPrompt.length > 0 ? `${basePrompt}\nFILES: ${filesForPrompt.join(', ')}` : basePrompt;
       sendSse('stage', { message: '正在读取附件并生成回答...' });
-      const { prompt, files } = await buildPromptWithFiles(promptWithAttachment, client);
+      const { prompt, files } = await buildPromptWithFiles(promptWithAttachment, client, latestAttachmentNameHints);
 
       if (wantsStream) {
         let aiRaw = '';
