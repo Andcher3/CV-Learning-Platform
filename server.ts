@@ -28,6 +28,42 @@ const NOTE_ALLOWED_EXTENSIONS = new Set([
   '.doc', '.docx', '.ppt', '.pptx',
   '.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.mov', '.avi', '.mkv', '.mp3', '.wav', '.m4a'
 ]);
+const INVALID_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1F]/g;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const normalizeUploadedFilename = (rawName: string) => {
+  const source = path.basename(String(rawName || '').replace(/\0/g, '').trim() || 'attachment.bin');
+  let repaired = source;
+  try {
+    repaired = Buffer.from(source, 'latin1').toString('utf8');
+  } catch (err) {}
+
+  const sourceHasHighLatin = /[\u00C0-\u00FF]/.test(source);
+  const repairedHasCjk = /[\u3400-\u9FFF]/.test(repaired);
+  const repairedLooksBroken = repaired.includes('�') || /[\u0000-\u001F]/.test(repaired);
+  const preferred = sourceHasHighLatin && repairedHasCjk && !repairedLooksBroken ? repaired : source;
+
+  const sanitized = path.basename(preferred).replace(INVALID_FILENAME_CHARS, '_').trim();
+  if (!sanitized) return 'attachment.bin';
+  if (sanitized.length <= 180) return sanitized;
+
+  const ext = path.extname(sanitized);
+  const maxBaseLength = Math.max(1, 180 - ext.length);
+  const base = path.basename(sanitized, ext).slice(0, maxBaseLength);
+  return `${base}${ext}`;
+};
+
+const getNormalizedOriginalName = (file: { originalname?: string; [key: string]: any }) => {
+  const cached = String(file?._normalizedOriginalName || '').trim();
+  if (cached) return cached;
+  const normalized = normalizeUploadedFilename(String(file?.originalname || ''));
+  if (file && typeof file === 'object') {
+    file._normalizedOriginalName = normalized;
+    file.originalname = normalized;
+  }
+  return normalized;
+};
+
 const toUtc8IsoString = (date: Date) => {
   const utc8Ms = date.getTime() + 8 * 60 * 60 * 1000;
   return new Date(utc8Ms).toISOString().replace('Z', '+08:00');
@@ -88,7 +124,8 @@ const storage = multer.diskStorage({
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
+    const normalizedOriginalName = getNormalizedOriginalName(file as any);
+    cb(null, uniqueSuffix + '-' + normalizedOriginalName);
   }
 });
 
@@ -198,32 +235,81 @@ async function startServer() {
     }
   };
 
-  const extractBinaryFileText = async (client: any, resolvedPath: string, uploadFilename?: string) => {
-    try {
-      const preferredName = String(uploadFilename || path.basename(resolvedPath) || 'attachment.bin');
-      const fileForUpload = await toFile(fs.createReadStream(resolvedPath) as any, preferredName);
-      const uploaded: any = await client.files.create({
-        file: fileForUpload,
-        purpose: 'file-extract'
-      });
-      const contentResp: any = await client.files.content(uploaded.id);
-      if (typeof contentResp?.text === 'function') {
-        const text = await contentResp.text();
-        return String(text || '');
-      }
-      if (typeof contentResp?.text === 'string') {
-        return String(contentResp.text || '');
-      }
-      if (typeof contentResp === 'string') {
-        return String(contentResp || '');
-      }
-      return '';
-    } catch (err) {
-      if (path.extname(resolvedPath).toLowerCase() === '.pdf') {
-        return await tryExtractPdfLocally(resolvedPath);
-      }
-      return '';
+  const readExtractedContentText = async (contentResp: any) => {
+    if (typeof contentResp?.text === 'function') {
+      const text = await contentResp.text();
+      return String(text || '');
     }
+    if (typeof contentResp?.text === 'string') {
+      return String(contentResp.text || '');
+    }
+    if (typeof contentResp === 'string') {
+      return String(contentResp || '');
+    }
+    return '';
+  };
+
+  const cleanupCloudExtractFile = async (client: any, fileId: string) => {
+    if (!fileId) return;
+    try {
+      if (typeof client?.files?.del === 'function') {
+        await client.files.del(fileId);
+        return;
+      }
+      if (typeof client?.files?.delete === 'function') {
+        await client.files.delete(fileId);
+      }
+    } catch (err) {}
+  };
+
+  const extractBinaryFileText = async (client: any, resolvedPath: string, uploadFilename?: string) => {
+    const preferredName = normalizeUploadedFilename(String(uploadFilename || path.basename(resolvedPath) || 'attachment.bin'));
+    const pollDelays = [700, 1500];
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let uploadedId = '';
+      try {
+        const fileForUpload = await toFile(fs.createReadStream(resolvedPath) as any, preferredName);
+        const uploaded: any = await client.files.create({
+          file: fileForUpload,
+          purpose: 'file-extract'
+        });
+        uploadedId = String(uploaded?.id || '').trim();
+        if (!uploadedId) {
+          throw new Error('FILE_UPLOAD_ID_MISSING');
+        }
+
+        let extractedText = '';
+        for (let poll = 0; poll <= pollDelays.length; poll++) {
+          if (poll > 0) {
+            await sleep(pollDelays[poll - 1]);
+          }
+          const contentResp: any = await client.files.content(uploadedId);
+          extractedText = await readExtractedContentText(contentResp);
+          if (extractedText) break;
+        }
+
+        if (extractedText) {
+          await cleanupCloudExtractFile(client, uploadedId);
+          return extractedText;
+        }
+      } catch (err) {
+      } finally {
+        if (uploadedId) {
+          await cleanupCloudExtractFile(client, uploadedId);
+        }
+      }
+
+      if (attempt < maxAttempts) {
+        await sleep(400 * attempt);
+      }
+    }
+
+    if (path.extname(resolvedPath).toLowerCase() === '.pdf') {
+      return await tryExtractPdfLocally(resolvedPath);
+    }
+    return '';
   };
 
   const resolveFilePathFromToken = (filePath: string) => {
@@ -234,11 +320,14 @@ async function startServer() {
 
   const parseNoteFileUrls = (note: any): string[] => {
     const urlsFromJson = (() => {
+      const raw = String(note?.file_urls || '').trim();
+      if (!raw) return [];
       try {
-        const parsed = JSON.parse(String(note?.file_urls || '[]'));
+        const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? parsed.map((item: any) => String(item || '').trim()).filter(Boolean) : [];
       } catch (err) {
-        return [];
+        // Compatibility fallback for legacy/non-JSON formats: "/notes/a,/notes/b" or newline-separated text.
+        return raw.split(/[\n,]/).map((item) => String(item || '').trim()).filter(Boolean);
       }
     })();
     if (urlsFromJson.length > 0) return urlsFromJson;
@@ -253,7 +342,7 @@ async function startServer() {
         const normalized: Record<string, string> = {};
         for (const [key, value] of Object.entries(parsed)) {
           const fileUrl = String(key || '').trim();
-          const original = String(value || '').trim();
+          const original = normalizeUploadedFilename(String(value || '').trim());
           if (!fileUrl || !original) continue;
           normalized[fileUrl] = original;
         }
@@ -283,7 +372,7 @@ async function startServer() {
             ? path.join(uploadsDir, path.basename(normalized))
             : null;
         if (!resolvedPath) return null;
-        const preferredName = String(fileNameMap?.[normalized] || path.basename(normalized) || '').trim();
+        const preferredName = normalizeUploadedFilename(String(fileNameMap?.[normalized] || path.basename(normalized) || '').trim());
         return {
           url: normalized,
           path: resolvedPath,
@@ -351,7 +440,7 @@ async function startServer() {
       if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) continue;
 
       const ext = path.extname(resolved).toLowerCase();
-      const displayName = String(fileNameHints?.[resolved] || path.basename(resolved) || '未知文件');
+      const displayName = normalizeUploadedFilename(String(fileNameHints?.[resolved] || path.basename(resolved) || '未知文件'));
       let extractedByCloud = false;
 
       // Cloud extraction first for all file types to maximize full-fidelity parsing.
@@ -787,18 +876,92 @@ async function startServer() {
       const normalizedBase = String(baseURL || '').replace(/\/+$/, '');
       const listEndpoint = `${normalizedBase}/files`;
 
+      const parseDeleteBeforeMs = (value: any) => {
+        if (value == null) return null;
+        const raw = String(value).trim();
+        if (!raw) return null;
+
+        // Date-only values are interpreted as UTC+8 00:00 to match product time semantics.
+        const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (dateOnlyMatch) {
+          const [_, y, m, d] = dateOnlyMatch;
+          const ms = Date.parse(`${y}-${m}-${d}T00:00:00+08:00`);
+          return Number.isFinite(ms) ? ms : Number.NaN;
+        }
+
+        if (/^\d+$/.test(raw)) {
+          const numeric = Number(raw);
+          if (!Number.isFinite(numeric)) return Number.NaN;
+          return numeric >= 1e12 ? numeric : numeric * 1000;
+        }
+
+        const ms = Date.parse(raw);
+        return Number.isFinite(ms) ? ms : Number.NaN;
+      };
+
+      const parseFileCreatedMs = (item: any) => {
+        const candidates = [
+          item?.created_at,
+          item?.createdAt,
+          item?.created,
+          item?.created_time,
+          item?.createdTime,
+          item?.uploaded_at,
+          item?.upload_time
+        ];
+
+        for (const value of candidates) {
+          if (value == null || value === '') continue;
+
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            return value >= 1e12 ? value : value * 1000;
+          }
+
+          const raw = String(value).trim();
+          if (!raw) continue;
+
+          if (/^\d+$/.test(raw)) {
+            const numeric = Number(raw);
+            if (Number.isFinite(numeric)) {
+              return numeric >= 1e12 ? numeric : numeric * 1000;
+            }
+          }
+
+          const parsed = Date.parse(raw);
+          if (!Number.isNaN(parsed)) {
+            return parsed;
+          }
+        }
+
+        return null;
+      };
+
+      const rawBefore = req.body?.before;
+      const beforeMs = parseDeleteBeforeMs(rawBefore);
+      if (rawBefore != null && String(rawBefore).trim() && Number.isNaN(beforeMs)) {
+        return res.status(400).json({ error: '日期参数 before 无效，请使用 YYYY-MM-DD 或 ISO 时间格式' });
+      }
+
       const requestHeaders = {
         Authorization: `Bearer ${apiKey}`
       };
 
       const failed: Array<{ id: string; status: number; error: string }> = [];
-      const seenIds = new Set<string>();
+      const seenFiles = new Map<string, { createdMs: number | null }>();
       let listedCount = 0;
+      let eligibleCount = 0;
       let deletedCount = 0;
+      let alreadyMissingCount = 0;
+      let skippedNewerCount = 0;
+      let skippedUnknownCreatedAtCount = 0;
       let pageCount = 0;
+      let stagnantPageCount = 0;
+      let cursorRecoveredCount = 0;
       let after = '';
 
-      while (pageCount < 50) {
+      // Phase 1: list files first, then delete in phase 2.
+      // This avoids invalidating list cursor by deleting files during pagination.
+      while (pageCount < 200) {
         pageCount += 1;
         const listUrl = new URL(listEndpoint);
         listUrl.searchParams.set('limit', '100');
@@ -814,6 +977,15 @@ async function startServer() {
 
         if (!listResp.ok) {
           const message = String(listData?.error?.message || listData?.error || '文件列表获取失败');
+          if (listResp.status === 400 && /invalid\s+cursor/i.test(message) && after) {
+            cursorRecoveredCount += 1;
+            after = '';
+            stagnantPageCount += 1;
+            if (cursorRecoveredCount > 10 || stagnantPageCount > 10) {
+              break;
+            }
+            continue;
+          }
           return res.status(502).json({ error: `获取云端文件列表失败: ${message}` });
         }
 
@@ -822,28 +994,40 @@ async function startServer() {
           break;
         }
 
+        let addedInPage = 0;
         for (const item of files) {
           const fileId = String(item?.id || '').trim();
-          if (!fileId || seenIds.has(fileId)) continue;
-          seenIds.add(fileId);
+          if (!fileId || seenFiles.has(fileId)) continue;
+
+          const createdMs = parseFileCreatedMs(item);
+          seenFiles.set(fileId, { createdMs });
           listedCount += 1;
+          addedInPage += 1;
 
-          const delResp = await fetch(`${listEndpoint}/${encodeURIComponent(fileId)}`, {
-            method: 'DELETE',
-            headers: requestHeaders
-          });
-
-          if (delResp.ok) {
-            deletedCount += 1;
+          if (beforeMs == null) {
+            eligibleCount += 1;
             continue;
           }
 
-          const delData: any = await delResp.json().catch(() => ({}));
-          failed.push({
-            id: fileId,
-            status: delResp.status,
-            error: String(delData?.error?.message || delData?.error || delResp.statusText || '删除失败')
-          });
+          if (createdMs == null) {
+            skippedUnknownCreatedAtCount += 1;
+            continue;
+          }
+
+          if (createdMs < beforeMs) {
+            eligibleCount += 1;
+          } else {
+            skippedNewerCount += 1;
+          }
+        }
+
+        if (addedInPage === 0) {
+          stagnantPageCount += 1;
+          if (stagnantPageCount > 5) {
+            break;
+          }
+        } else {
+          stagnantPageCount = 0;
         }
 
         const hasMore = Boolean(listData?.has_more);
@@ -854,11 +1038,59 @@ async function startServer() {
         after = lastId;
       }
 
+      // Phase 2: delete only the files matched by optional before-date filter.
+      for (const [fileId, meta] of seenFiles.entries()) {
+        if (beforeMs != null) {
+          if (meta.createdMs == null) continue;
+          if (meta.createdMs >= beforeMs) continue;
+        }
+
+        const delResp = await fetch(`${listEndpoint}/${encodeURIComponent(fileId)}`, {
+          method: 'DELETE',
+          headers: requestHeaders
+        });
+
+        if (delResp.ok) {
+          deletedCount += 1;
+          continue;
+        }
+
+        if (delResp.status === 404) {
+          alreadyMissingCount += 1;
+          continue;
+        }
+
+        const delData: any = await delResp.json().catch(() => ({}));
+        failed.push({
+          id: fileId,
+          status: delResp.status,
+          error: String(delData?.error?.message || delData?.error || delResp.statusText || '删除失败')
+        });
+      }
+
+      const warnings: string[] = [];
+      if (pageCount >= 200) {
+        warnings.push('扫描页数达到上限 200 页，结果可能不是完整集合。');
+      }
+      if (cursorRecoveredCount > 0) {
+        warnings.push(`分页过程中自动恢复了 ${cursorRecoveredCount} 次失效 cursor。`);
+      }
+      if (stagnantPageCount > 5) {
+        warnings.push('连续多页无新增文件，提前停止扫描以避免死循环。');
+      }
+
       return res.json({
         listed_count: listedCount,
+        eligible_count: eligibleCount,
+        deleted_before: beforeMs == null ? null : new Date(beforeMs).toISOString(),
         deleted_count: deletedCount,
+        already_missing_count: alreadyMissingCount,
+        skipped_newer_count: skippedNewerCount,
+        skipped_unknown_created_at_count: skippedUnknownCreatedAtCount,
+        cursor_recovered_count: cursorRecoveredCount,
         failed_count: failed.length,
-        failed
+        failed,
+        warning: warnings.length ? warnings.join(' ') : undefined
       });
     } catch (err: any) {
       return res.status(500).json({ error: err?.message || '清空云端文件失败' });
@@ -2128,8 +2360,13 @@ async function startServer() {
       ...(uploadedByField.file || [])
     ];
 
+    uploadedFiles.forEach((file) => {
+      getNormalizedOriginalName(file as any);
+    });
+
     const invalidFiles = uploadedFiles.filter((file) => {
-      const ext = path.extname(String(file.originalname || '')).toLowerCase();
+      const originalName = getNormalizedOriginalName(file as any);
+      const ext = path.extname(String(originalName || '')).toLowerCase();
       return !NOTE_ALLOWED_EXTENSIONS.has(ext);
     });
     if (invalidFiles.length > 0) {
@@ -2138,7 +2375,7 @@ async function startServer() {
           if (file?.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
         } catch (err) {}
       }
-      const names = invalidFiles.map((file) => String(file.originalname || '未知文件')).join('、');
+      const names = invalidFiles.map((file) => getNormalizedOriginalName(file as any) || '未知文件').join('、');
       return respondError(400, `以下文件类型暂不支持上传：${names}`);
     }
 
@@ -2146,7 +2383,8 @@ async function startServer() {
     const fileNameMapByUrl: Record<string, string> = {};
     for (let index = 0; index < uploadedFiles.length; index++) {
       const currentFile = uploadedFiles[index];
-      const originalExt = path.extname(currentFile.originalname || '').toLowerCase();
+      const originalName = getNormalizedOriginalName(currentFile as any);
+      const originalExt = path.extname(originalName || '').toLowerCase();
       const ext = originalExt || '.bin';
       const suffix = uploadedFiles.length > 1 ? `-${index + 1}` : '';
       const filename = `note-s${req.user.id}-u${unitId}-n${noteVersion}-file${suffix}${ext}`;
@@ -2155,7 +2393,7 @@ async function startServer() {
       fs.renameSync(fromPath, toPath);
       const fileUrlToken = `/notes/${filename}`;
       fileUrls.push(fileUrlToken);
-      fileNameMapByUrl[fileUrlToken] = String(currentFile.originalname || filename).trim();
+      fileNameMapByUrl[fileUrlToken] = String(originalName || filename).trim();
     }
     const fileUrl = fileUrls[0] || null;
 

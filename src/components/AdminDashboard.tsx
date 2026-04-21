@@ -1671,6 +1671,7 @@ function AISettings() {
   const [testResult, setTestResult] = useState('');
   const [clearingFiles, setClearingFiles] = useState(false);
   const [clearResult, setClearResult] = useState('');
+  const [clearBeforeDate, setClearBeforeDate] = useState('');
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/admin/settings`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
@@ -1727,7 +1728,10 @@ function AISettings() {
   };
 
   const handleClearCloudFiles = async () => {
-    const confirmed = window.confirm('确定清空当前 AI 服务商（如 KIMI）中的所有已上传文件吗？该操作不可撤销。');
+    const scopeText = clearBeforeDate
+      ? `仅删除 ${clearBeforeDate} 之前上传的文件`
+      : '清空所有已上传文件';
+    const confirmed = window.confirm(`确定${scopeText}吗？该操作不可撤销。`);
     if (!confirmed) return;
 
     setClearingFiles(true);
@@ -1735,7 +1739,11 @@ function AISettings() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/ai/files/clear`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ before: clearBeforeDate || undefined })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1745,7 +1753,29 @@ function AISettings() {
       const failedPreview = Array.isArray(data?.failed) && data.failed.length > 0
         ? `\n失败样例：${data.failed.slice(0, 5).map((item: any) => `${item.id}(${item.status})`).join('，')}`
         : '';
-      setClearResult(`已处理完成：扫描 ${data?.listed_count ?? 0} 份，删除成功 ${data?.deleted_count ?? 0} 份，失败 ${data?.failed_count ?? 0} 份。${failedPreview}`);
+      const deletedBeforeText = data?.deleted_before
+        ? `\n删除范围：仅删除 ${formatDateTimeCn(data.deleted_before)} 之前上传的文件。`
+        : '\n删除范围：全量扫描并删除。';
+      const filterSummary = data?.deleted_before
+        ? `\n筛选结果：符合条件 ${data?.eligible_count ?? 0} 份，跳过较新文件 ${data?.skipped_newer_count ?? 0} 份，因时间未知跳过 ${data?.skipped_unknown_created_at_count ?? 0} 份。`
+        : '';
+      const recoverySummary = Number(data?.cursor_recovered_count || 0) > 0
+        ? `\n分页恢复：自动恢复失效 cursor ${data.cursor_recovered_count} 次。`
+        : '';
+      const missingSummary = Number(data?.already_missing_count || 0) > 0
+        ? `\n并发清理：发现 ${data.already_missing_count} 份文件已不存在，按已清理处理。`
+        : '';
+      const warningSummary = data?.warning ? `\n提示：${data.warning}` : '';
+
+      setClearResult(
+        `已处理完成：扫描 ${data?.listed_count ?? 0} 份，删除成功 ${data?.deleted_count ?? 0} 份，失败 ${data?.failed_count ?? 0} 份。` +
+        deletedBeforeText +
+        filterSummary +
+        recoverySummary +
+        missingSummary +
+        warningSummary +
+        failedPreview
+      );
     } catch (err: any) {
       setClearResult(`错误: ${err?.message || '清空失败'}`);
     } finally {
@@ -1830,14 +1860,34 @@ function AISettings() {
           <div className="mt-2 pt-4 border-t border-slate-200">
             <div className="text-sm font-medium text-slate-900 mb-2">KIMI 云端文件维护</div>
             <p className="text-xs text-slate-500 mb-3">
-              清空 AI 平台云端文件池（不影响服务器本地保存的学生附件）。适用于处理 KIMI 文件数上限问题。
+              清理 AI 平台云端文件池（不影响服务器本地保存的学生附件）。可全量清理，或只删除某个日期以前上传的文件。
             </p>
+            <div className="mb-3">
+              <label className="block text-xs font-medium text-slate-700 mb-1">仅删除该日期以前上传的文件（可选）</label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="date"
+                  value={clearBeforeDate}
+                  onChange={(e) => setClearBeforeDate(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                {clearBeforeDate && (
+                  <button
+                    onClick={() => setClearBeforeDate('')}
+                    className="px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 transition"
+                  >
+                    清空日期条件
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">留空表示全量清理。填写日期后，将按 UTC+8 的当日 00:00 作为阈值，仅删除更早上传的文件。</p>
+            </div>
             <button
               onClick={handleClearCloudFiles}
               disabled={clearingFiles}
               className="bg-rose-600 text-white px-4 py-2 rounded-lg hover:bg-rose-700 transition disabled:opacity-50"
             >
-              {clearingFiles ? '清空中...' : '清空 KIMI 云端文件'}
+              {clearingFiles ? '清理中...' : (clearBeforeDate ? '删除该日期前云端文件' : '清空 KIMI 云端文件')}
             </button>
             {clearResult && (
               <div className="mt-3 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3 whitespace-pre-wrap">
