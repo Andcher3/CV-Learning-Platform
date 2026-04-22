@@ -1438,6 +1438,8 @@ function AdminQuizzes() {
   const [loading, setLoading] = useState(true);
   const [quizSortKey, setQuizSortKey] = useState<'id' | 'unit_title' | 'student_username' | 'status' | 'score' | 'created_at' | 'expires_at'>('created_at');
   const [quizSortDirection, setQuizSortDirection] = useState<SortDirection>('desc');
+  const [recordStudentFilter, setRecordStudentFilter] = useState('');
+  const [quizDetailRecord, setQuizDetailRecord] = useState<any | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -1479,9 +1481,88 @@ function AdminQuizzes() {
     return formatDateTimeCn(value);
   };
 
+  const parseJsonSafe = (raw: any, fallback: any) => {
+    if (raw == null || raw === '') return fallback;
+    if (typeof raw === 'object') return raw;
+    try {
+      return JSON.parse(String(raw));
+    } catch (err) {
+      return fallback;
+    }
+  };
+
+  const formatQuestionOptions = (options: any) => {
+    if (Array.isArray(options)) {
+      return options.map((item, index) => `${String.fromCharCode(65 + index)}. ${String(item ?? '')}`);
+    }
+    if (options && typeof options === 'object') {
+      return Object.entries(options).map(([key, value]) => `${key}. ${String(value ?? '')}`);
+    }
+    const plain = String(options || '').trim();
+    return plain ? [plain] : [];
+  };
+
+  const filteredQuizRecords = useMemo(() => {
+    if (!recordStudentFilter) return records;
+    return records.filter((item: any) => String(item?.student_id || '') === recordStudentFilter);
+  }, [recordStudentFilter, records]);
+
   const sortedQuizRecords = useMemo(() => {
-    return sortRows(records, (item) => item?.[quizSortKey], quizSortDirection);
-  }, [quizSortDirection, quizSortKey, records]);
+    return sortRows(filteredQuizRecords, (item) => item?.[quizSortKey], quizSortDirection);
+  }, [filteredQuizRecords, quizSortDirection, quizSortKey]);
+
+  const quizDetailRows = useMemo(() => {
+    if (!quizDetailRecord) return [];
+
+    const questions = parseJsonSafe(quizDetailRecord.quiz_payload, [] as any[]);
+    const answerRows = parseJsonSafe(quizDetailRecord.answer_key, [] as any[]);
+    const studentAnswers = parseJsonSafe(quizDetailRecord.student_answers, {} as Record<string, string>);
+    const gradingDetailRows = parseJsonSafe(quizDetailRecord.grading_detail, [] as any[]);
+
+    const answerMap = new Map<string, { correctAnswer: string; explanation: string }>();
+    for (const row of answerRows) {
+      const id = String(row?.id || '').trim();
+      if (!id) continue;
+      answerMap.set(id, {
+        correctAnswer: String(row?.correctAnswer || '').trim().toUpperCase(),
+        explanation: String(row?.explanation || '').trim(),
+      });
+    }
+
+    const gradingMap = new Map<string, { isCorrect: boolean; explanation: string; correctAnswer: string }>();
+    for (const row of gradingDetailRows) {
+      const id = String(row?.id || '').trim();
+      if (!id) continue;
+      gradingMap.set(id, {
+        isCorrect: !!row?.is_correct,
+        explanation: String(row?.explanation || '').trim(),
+        correctAnswer: String(row?.correct_answer || '').trim().toUpperCase(),
+      });
+    }
+
+    return questions.map((question: any, index: number) => {
+      const id = String(question?.id || '').trim();
+      const userAnswer = String(studentAnswers?.[id] || '').trim().toUpperCase();
+      const baseAnswer = answerMap.get(id);
+      const gradingAnswer = gradingMap.get(id);
+      const correctAnswer = String(gradingAnswer?.correctAnswer || baseAnswer?.correctAnswer || '').trim().toUpperCase();
+      const isCorrect = gradingAnswer ? gradingAnswer.isCorrect : (!!correctAnswer && userAnswer === correctAnswer);
+      const options = formatQuestionOptions(question?.options);
+
+      return {
+        index: index + 1,
+        id,
+        difficulty: String(question?.difficulty || '-'),
+        sourceNumber: question?.sourceNumber,
+        prompt: String(question?.prompt || ''),
+        options,
+        userAnswer,
+        correctAnswer,
+        isCorrect,
+        explanation: String(gradingAnswer?.explanation || baseAnswer?.explanation || '').trim(),
+      };
+    });
+  }, [quizDetailRecord]);
 
   const handleAssign = async () => {
     setMessage('');
@@ -1608,6 +1689,25 @@ function AdminQuizzes() {
             <option value="asc">升序</option>
             <option value="desc">降序</option>
           </select>
+          <span className="text-xs text-slate-500 ml-3">学生筛选</span>
+          <select
+            value={recordStudentFilter}
+            onChange={(e) => setRecordStudentFilter(e.target.value)}
+            className="border border-slate-300 rounded px-2 py-1 text-sm"
+          >
+            <option value="">全部学生</option>
+            {students.map((student: any) => (
+              <option key={student.id} value={student.id}>{student.username}</option>
+            ))}
+          </select>
+          {recordStudentFilter && (
+            <button
+              onClick={() => setRecordStudentFilter('')}
+              className="text-xs px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-100"
+            >
+              清空筛选
+            </button>
+          )}
         </div>
         {loading ? (
           <div className="p-6 text-slate-500">加载中...</div>
@@ -1624,6 +1724,7 @@ function AdminQuizzes() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">正确题数</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">发放时间</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">截止时间</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">详情</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
@@ -1645,11 +1746,19 @@ function AdminQuizzes() {
                     <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{typeof item.correct_count === 'number' ? `${item.correct_count}/${item.total_questions}` : '-'}</td>
                     <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.created_at)}</td>
                     <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{formatDate(item.expires_at)}</td>
+                    <td className="px-4 py-3 text-sm whitespace-nowrap">
+                      <button
+                        onClick={() => setQuizDetailRecord(item)}
+                        className="px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100"
+                      >
+                        查看题目与作答
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {sortedQuizRecords.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-6 text-center text-slate-500">暂无测试记录</td>
+                    <td colSpan={9} className="px-4 py-6 text-center text-slate-500">暂无测试记录</td>
                   </tr>
                 )}
               </tbody>
@@ -1657,6 +1766,78 @@ function AdminQuizzes() {
           </div>
         )}
       </div>
+
+      {quizDetailRecord && (
+        <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-5xl max-h-[90vh] rounded-xl shadow-xl border border-slate-200 flex flex-col overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h4 className="text-lg font-semibold text-slate-900">测试详情</h4>
+                <p className="text-sm text-slate-600 mt-1">
+                  ID: {quizDetailRecord.id} · 学生：{quizDetailRecord.student_username} · 单元：{quizDetailRecord.unit_title}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  状态：{quizDetailRecord.status === 'submitted' ? '已提交' : quizDetailRecord.status === 'expired' ? '已过期' : '待作答'}
+                  {' · '}分数：{quizDetailRecord.score ?? '-'}
+                  {' · '}正确题数：{typeof quizDetailRecord.correct_count === 'number' ? `${quizDetailRecord.correct_count}/${quizDetailRecord.total_questions}` : '-'}
+                </p>
+              </div>
+              <button
+                onClick={() => setQuizDetailRecord(null)}
+                className="px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-100"
+              >
+                关闭
+              </button>
+            </div>
+
+            <div className="overflow-auto p-4">
+              {quizDetailRows.length === 0 ? (
+                <div className="text-sm text-slate-500 p-4">暂无题目数据</div>
+              ) : (
+                <div className="space-y-3">
+                  {quizDetailRows.map((row: any) => (
+                    <div key={`${row.id}-${row.index}`} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="text-sm font-medium text-slate-900">第{row.index}题（ID: {row.id || '-' }）</div>
+                        <div className="text-xs text-slate-500">
+                          难度：{row.difficulty} · 题号：{row.sourceNumber ?? '-'}
+                        </div>
+                      </div>
+                      <div className="mt-2 text-sm text-slate-800 whitespace-pre-wrap">{row.prompt || '（无题干）'}</div>
+                      {row.options.length > 0 && (
+                        <div className="mt-2 text-sm text-slate-600 space-y-1">
+                          {row.options.map((line: string, idx: number) => (
+                            <div key={`${row.id}-opt-${idx}`} className="whitespace-pre-wrap">{line}</div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                        <div>
+                          <span className="text-slate-500">学生作答：</span>
+                          <span className="font-medium text-slate-900">{row.userAnswer || '未作答'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">正确答案：</span>
+                          <span className="font-medium text-slate-900">{row.correctAnswer || '-'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">判定：</span>
+                          <span className={`font-medium ${row.userAnswer ? (row.isCorrect ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-500'}`}>
+                            {row.userAnswer ? (row.isCorrect ? '正确' : '错误') : '未提交'}
+                          </span>
+                        </div>
+                      </div>
+                      {row.explanation && (
+                        <div className="mt-2 text-xs text-slate-600 whitespace-pre-wrap">解析：{row.explanation}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
